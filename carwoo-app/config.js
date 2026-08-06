@@ -18,4 +18,4 @@
      - SEM /api no final (o sistema acrescenta sozinho)
    ============================================================ */
 
-window.CARWOO_API = "";
+window.CARWOO_API = "https://carwoo-api.onrender.com";
