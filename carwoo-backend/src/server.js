@@ -20,16 +20,23 @@ const { exigirPermissao } = require('./middleware/role');
 
 const app = express();
 
-// Aceita apenas as origens listadas no .env (separadas por vírgula)
+// Aceita apenas as origens listadas no .env (separadas por vírgula).
+//
+// A barra do final é removida de propósito: o navegador manda a origem
+// SEM barra ("https://loja.netlify.app"), mas ao copiar o endereço da
+// barra do navegador vem COM barra. Sem esta limpeza, o site é bloqueado
+// e a tela diz "Servidor fora do ar" mesmo com tudo funcionando.
+const semBarraFinal = (v) => String(v || '').trim().replace(/\/+$/, '');
+
 const origensPermitidas = (process.env.CORS_ORIGIN || '')
   .split(',')
-  .map((o) => o.trim())
+  .map(semBarraFinal)
   .filter(Boolean);
 
 app.use(cors({
   origin(origin, callback) {
     // Requisições sem origin (Postman, curl, apps nativos) passam
-    if (!origin || origensPermitidas.length === 0 || origensPermitidas.includes(origin)) {
+    if (!origin || origensPermitidas.length === 0 || origensPermitidas.includes(semBarraFinal(origin))) {
       return callback(null, true);
     }
     callback(new Error('Origem não autorizada pelo CORS.'));
