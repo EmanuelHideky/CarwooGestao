@@ -28,3 +28,6 @@ build/
 # Editores
 .vscode/
 .idea/
+
+# Configuracao local do Claude Code - nao faz parte do projeto
+.claude/
