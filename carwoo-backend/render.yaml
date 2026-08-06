@@ -14,7 +14,12 @@ services:
     name: carwoo-api
     runtime: node
     plan: free
-    region: oregon
+    # O Render nao tem servidor no Brasil. Entre as opcoes (Oregon, Ohio,
+    # Virginia, Frankfurt, Singapura), a Virginia e a mais proxima daqui -
+    # cerca de 7.600 km ate Sao Paulo, contra 10.500 km de Oregon. Como o
+    # trafego Brasil-EUA ja passa por la, a diferenca e real: perto de 130ms
+    # de ida e volta, contra uns 200ms de Oregon.
+    region: virginia
     rootDir: carwoo-backend
     # A migracao roda a cada publicacao. E segura repetir: so cria o que
     # falta. Assim o banco nunca fica atrasado em relacao ao codigo.
