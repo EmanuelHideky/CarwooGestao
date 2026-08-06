@@ -1,0 +1,27 @@
+# Configuracao da publicacao no Netlify.
+# Basta a pasta carwoo-app estar publicada: o Netlify le este arquivo sozinho.
+
+[build]
+  publish = "."
+
+# O config.js diz onde fica o servidor. Nao pode ser guardado em cache,
+# senao trocar o endereco do servidor nao chega a quem ja usou o app.
+[[headers]]
+  for = "/config.js"
+  [headers.values]
+    Cache-Control = "no-store, must-revalidate"
+
+# O service worker tambem precisa ser sempre buscado novo, senao uma versao
+# antiga continua servindo a tela antiga por tempo indeterminado.
+[[headers]]
+  for = "/service-worker.js"
+  [headers.values]
+    Cache-Control = "no-store, must-revalidate"
+
+# Cabecalhos de seguranca basicos
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "SAMEORIGIN"
+    Referrer-Policy = "strict-origin-when-cross-origin"

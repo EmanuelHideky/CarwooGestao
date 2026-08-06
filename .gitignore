@@ -1,0 +1,30 @@
+# ============================================================
+# Arquivos que NUNCA podem sair do seu computador
+# ------------------------------------------------------------
+# O .env guarda a senha do banco e a chave do Supabase. Se ele
+# for parar num repositorio publico, qualquer pessoa consegue
+# ler e apagar os dados da sua loja e dos seus clientes.
+# ============================================================
+.env
+.env.*
+!.env.example
+
+# Dependencias: sao reinstaladas com "npm install", nao precisam ir junto
+node_modules/
+
+# Registros e arquivos temporarios
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# Pastas de build dos servicos de publicacao
+.netlify/
+.vercel/
+.railway/
+dist/
+build/
+
+# Editores
+.vscode/
+.idea/

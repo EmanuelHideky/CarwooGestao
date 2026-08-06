@@ -1,0 +1,48 @@
+# Configuracao da publicacao do servidor no Render.
+#
+# COMO USAR
+# No painel do Render, escolha "New > Blueprint" e aponte para o repositorio.
+# O Render le este arquivo e cria o servico sozinho.
+#
+# ATENCAO: as variaveis marcadas com sync: false NAO ficam neste arquivo.
+# Voce cola o valor de cada uma no painel do Render, na aba Environment.
+# Elas contem a senha do banco e a chave do Supabase - nunca podem ir para
+# um repositorio.
+
+services:
+  - type: web
+    name: carwoo-api
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: carwoo-backend
+    # A migracao roda a cada publicacao. E segura repetir: so cria o que
+    # falta. Assim o banco nunca fica atrasado em relacao ao codigo.
+    buildCommand: npm install && npm run migrate
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+
+      # Conexao com o banco (Supabase) - cole no painel
+      - key: DATABASE_URL
+        sync: false
+
+      # Chave que assina os logins - cole no painel
+      - key: JWT_SECRET
+        sync: false
+
+      # Endereco do front-end publicado, ex: https://carwoo.netlify.app
+      # PREENCHA SEMPRE. Se ficar vazio, o servidor aceita chamadas de
+      # qualquer site da internet, e nao so do seu.
+      - key: CORS_ORIGIN
+        sync: false
+
+      # Armazenamento das fotos (Supabase Storage) - cole no painel
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: veiculos
