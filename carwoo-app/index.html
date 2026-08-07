@@ -121,6 +121,38 @@ button{font-family:inherit;}
 .search-box svg{width:16px; height:16px; stroke:currentColor; flex-shrink:0;}
 .search-box input{border:none; outline:none; background:transparent; font-size:13px; color:var(--text); width:100%; font-family:inherit;}
 .search-box input::placeholder{color:var(--text-muted);}
+
+/* ---- Resultados da busca global ----
+   Fica ancorado à caixa de busca, por isso o .search-box vira relativo.
+   Usa só variáveis de tema, então funciona nas duas interfaces. */
+.search-box{position:relative;}
+.busca-resultados{
+  position:absolute; top:calc(100% + 7px); left:0; width:min(520px, 92vw);
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  box-shadow:var(--shadow); z-index:60; display:none; overflow:hidden; max-height:70vh; overflow-y:auto;
+  /* A .search-box pinta o texto de cinza para o ícone da lupa. Sem esta
+     linha, os resultados herdariam esse cinza e ficariam apagados. */
+  color:var(--text);
+}
+.busca-resultados.open{display:block;}
+.busca-grupo{padding:9px 13px 4px; font-size:10.5px; font-weight:700; letter-spacing:0.06em;
+  text-transform:uppercase; color:var(--text-muted); background:var(--surface-2);
+  border-top:1px solid var(--border);}
+.busca-grupo:first-child{border-top:none;}
+.busca-item{display:flex; align-items:center; gap:11px; padding:9px 13px; cursor:pointer; border-top:1px solid transparent;}
+.busca-item:hover, .busca-item.ativo{background:var(--surface-hover);}
+.busca-item .bi-icone{width:30px; height:30px; border-radius:8px; background:var(--surface-2);
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;}
+.busca-item .bi-icone svg{width:15px; height:15px; stroke:var(--text-secondary);}
+.busca-item .bi-txt{flex:1; min-width:0;}
+.busca-item .bi-titulo{font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.busca-item .bi-sub{font-size:11.5px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.busca-item mark{background:var(--orange-soft); color:var(--orange-dark); padding:0 1px; border-radius:2px;}
+.busca-vazio{padding:18px 15px; text-align:center; color:var(--text-muted); font-size:12.5px; line-height:1.5;}
+.busca-rodape{padding:8px 13px; font-size:11px; color:var(--text-muted); background:var(--surface-2);
+  border-top:1px solid var(--border); display:flex; gap:12px; flex-wrap:wrap;}
+.busca-rodape kbd{background:var(--surface); border:1px solid var(--border); border-radius:4px;
+  padding:1px 5px; font-family:inherit; font-size:10.5px;}
 .topbar-actions{display:flex; align-items:center; gap:8px; margin-left:auto;}
 .icon-btn{
   width:36px; height:36px; border-radius:9px; border:1px solid var(--border); background:var(--surface);
@@ -902,7 +934,8 @@ tbody tr:hover{background:var(--surface-2);}
       <div class="page-title-mini" id="topbarTitle">Dashboard</div>
       <div class="search-box">
         <svg><use href="#i-search"/></svg>
-        <input type="text" id="globalSearch" placeholder="Buscar veículo, cliente ou placa...">
+        <input type="text" id="globalSearch" placeholder="Buscar veículo, cliente, placa ou tela..." autocomplete="off">
+        <div class="busca-resultados" id="buscaResultados"></div>
       </div>
       <div class="topbar-actions">
         <button class="icon-btn theme-toggle" id="themeToggle" aria-label="Alternar tema">
@@ -3077,6 +3110,13 @@ const FERRAMENTAS = {
     icone: 'i-gauge',
     permissao: 'precificacao',
   },
+  ficha: {
+    nome: 'Ficha do veículo',
+    resumo: 'Monta a folha com foto, ficha técnica e preço para colar no vidro do carro. Dá para imprimir vários de uma vez.',
+    quando: 'Use ao colocar um carro no pátio.',
+    icone: 'i-file',
+    permissao: null,
+  },
   alertas: {
     nome: 'Alertas do estoque',
     resumo: 'Carros encalhados, sem foto, sem anúncio ou com documentação pendente.',
@@ -3158,6 +3198,228 @@ function renderFerramentaAberta(chave){
     calcularTroca();
     return;
   }
+  if(chave === 'ficha'){
+    el_.innerHTML = cabecalhoFerramenta(chave) + renderCardFicha();
+    return;
+  }
+}
+
+/* ---- Ficha do veículo para imprimir ----
+   Lista os carros que estão no pátio e monta a folha de vidro. A ficha é
+   feita para o comprador ver: não entra custo, margem nem nada financeiro
+   interno, mesmo quando quem imprime é o dono. */
+function veiculosParaFicha(){
+  return state.vehicles
+    .filter(v => v.status !== 'vendido')
+    .sort((a,b) => `${a.marca}${a.modelo}`.localeCompare(`${b.marca}${b.modelo}`));
+}
+
+function renderCardFicha(){
+  const lista = veiculosParaFicha();
+
+  if(!lista.length){
+    return `<div class="card"><div class="busca-vazio">
+      Nenhum veículo disponível no estoque.<br>
+      Cadastre um veículo para gerar a ficha.
+    </div></div>`;
+  }
+
+  return `
+    <div class="card" style="margin-bottom:14px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <div>
+          <div style="font-weight:700; font-size:13.5px;">${lista.length} veículo${lista.length>1?'s':''} no pátio</div>
+          <div class="cell-muted" style="margin-top:3px;">Marque os que quiser e imprima de uma vez. Cada ficha sai numa folha.</div>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-sm" onclick="marcarTodasFichas(true)">Marcar todos</button>
+          <button class="btn btn-sm" onclick="marcarTodasFichas(false)">Desmarcar</button>
+          <button class="btn btn-primary btn-sm" onclick="imprimirFichasSelecionadas()"><svg><use href="#i-file"/></svg>Imprimir selecionados</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th style="width:38px;"></th>
+          <th>Veículo</th><th>Placa</th><th>Ano</th><th>Km</th><th>Preço</th><th>Foto</th><th></th>
+        </tr></thead>
+        <tbody>
+          ${lista.map(v => {
+            const temFoto = (v.fotosData && v.fotosData.length) > 0;
+            return `<tr>
+              <td><input type="checkbox" class="ficha-check" value="${v.id}" style="width:15px;height:15px;accent-color:var(--orange);"></td>
+              <td>
+                <div style="font-weight:600;">${esc(v.marca)} ${esc(v.modelo)}</div>
+                <div class="cell-muted" style="font-size:11px;">${esc(v.versao || '—')}</div>
+              </td>
+              <td class="mono">${esc(v.placa || '—')}</td>
+              <td class="mono">${v.anoFab}/${v.anoMod}</td>
+              <td class="mono">${km(v.km)}</td>
+              <td class="mono" style="font-weight:600;">${brl(v.preco)}</td>
+              <td>${temFoto
+                ? '<span class="badge badge-success">sim</span>'
+                : '<span class="badge badge-warning" title="A ficha sai sem foto">sem foto</span>'}</td>
+              <td style="text-align:right;">
+                <button class="btn btn-sm" onclick="imprimirFichas([${v.id}])"><svg><use href="#i-file"/></svg>Imprimir</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function marcarTodasFichas(marcar){
+  document.querySelectorAll('.ficha-check').forEach(c => { c.checked = marcar; });
+}
+
+function imprimirFichasSelecionadas(){
+  const ids = [...document.querySelectorAll('.ficha-check:checked')].map(c => Number(c.value));
+  if(!ids.length){ showToast('Marque ao menos um veículo'); return; }
+  imprimirFichas(ids);
+}
+
+/* Monta o HTML de uma ficha. Só entra informação que o comprador pode ver. */
+function htmlDaFicha(v){
+  const capa = (v.fotosData && v.fotosData.length) ? fotoSrc(v.fotosData[0]) : '';
+  const loja = state.loja || {};
+
+  const specs = [
+    ['Ano', `${v.anoFab}/${v.anoMod}`],
+    ['Quilometragem', km(v.km)],
+    ['Câmbio', v.cambio || '—'],
+    ['Combustível', v.combustivel || '—'],
+    ['Cor', v.cor || '—'],
+    ['Portas', v.portas ? `${v.portas} portas` : '—'],
+    ['Final da placa', v.placa ? String(v.placa).replace(/\D/g,'').slice(-1) || '—' : '—'],
+  ];
+
+  const contato = [loja.telefone ? exibirTelefone(loja.telefone) : '', loja.cidade && loja.estado ? `${loja.cidade}/${loja.estado}` : '']
+    .filter(Boolean).join('  ·  ');
+
+  return `
+  <section class="ficha">
+    <header class="f-topo">
+      <div class="f-loja">${esc(loja.nome || 'Minha Loja')}</div>
+      ${contato ? `<div class="f-contato">${esc(contato)}</div>` : ''}
+    </header>
+
+    <h1 class="f-modelo">${esc(v.marca)} ${esc(v.modelo)}</h1>
+    ${v.versao ? `<div class="f-versao">${esc(v.versao)}</div>` : ''}
+
+    <div class="f-foto">
+      ${capa
+        ? `<img src="${capa}" alt="">`
+        : `<div class="f-semfoto">Sem foto cadastrada</div>`}
+    </div>
+
+    <div class="f-specs">
+      ${specs.map(([r,val]) => `<div class="f-spec"><span class="f-rot">${r}</span><span class="f-val">${esc(val)}</span></div>`).join('')}
+    </div>
+
+    ${v.descricao ? `<div class="f-desc">${esc(String(v.descricao).slice(0, 400))}</div>` : ''}
+
+    <div class="f-preco">
+      <span class="f-preco-rot">Valor</span>
+      <span class="f-preco-val">${brl(v.preco)}</span>
+    </div>
+
+    <footer class="f-rodape">
+      ${loja.telefone ? `Fale conosco: ${esc(exibirTelefone(loja.telefone))}` : 'Consulte um vendedor'}
+      ${loja.instagram ? `  ·  @${esc(loja.instagram)}` : ''}
+    </footer>
+  </section>`;
+}
+
+/* Imprime as fichas usando um quadro escondido na própria página.
+   Evita abrir janela nova, que o bloqueador de pop-up costuma barrar. */
+function imprimirFichas(ids){
+  const veiculos = ids.map(id => vehicleById(id)).filter(Boolean);
+  if(!veiculos.length){ showToast('Veículo não encontrado'); return; }
+
+  const anterior = document.getElementById('quadroImpressao');
+  if(anterior) anterior.remove();
+
+  const quadro = document.createElement('iframe');
+  quadro.id = 'quadroImpressao';
+  quadro.setAttribute('aria-hidden', 'true');
+  quadro.style.cssText = 'position:fixed; right:0; bottom:0; width:0; height:0; border:0; visibility:hidden;';
+  document.body.appendChild(quadro);
+
+  const doc = quadro.contentWindow.document;
+  doc.open();
+  doc.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<title>Ficha do veículo</title>
+<style>
+  @page { size: A4 portrait; margin: 14mm; }
+  *{box-sizing:border-box;}
+  body{margin:0; font-family:'Segoe UI', Arial, Helvetica, sans-serif; color:#141414; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
+  .ficha{page-break-after:always; break-after:page; display:flex; flex-direction:column; min-height:265mm;}
+  .ficha:last-child{page-break-after:auto; break-after:auto;}
+
+  .f-topo{display:flex; justify-content:space-between; align-items:baseline; gap:12px;
+    border-bottom:2px solid #141414; padding-bottom:7px; margin-bottom:16px;}
+  .f-loja{font-size:17pt; font-weight:700; letter-spacing:-0.01em;}
+  .f-contato{font-size:9.5pt; color:#555;}
+
+  .f-modelo{font-size:31pt; line-height:1.05; margin:0; font-weight:800; letter-spacing:-0.02em;}
+  .f-versao{font-size:13pt; color:#F5813C; font-weight:600; margin-top:3px;}
+
+  .f-foto{margin:15px 0; border:1px solid #ddd; border-radius:7px; overflow:hidden;
+    height:88mm; display:flex; align-items:center; justify-content:center; background:#f4f4f4;}
+  .f-foto img{width:100%; height:100%; object-fit:cover; display:block;}
+  .f-semfoto{color:#999; font-size:11pt;}
+
+  .f-specs{display:grid; grid-template-columns:repeat(2, 1fr); gap:0 22px;}
+  .f-spec{display:flex; justify-content:space-between; align-items:baseline;
+    padding:7px 0; border-bottom:1px solid #e6e6e6;}
+  .f-rot{font-size:10pt; color:#666;}
+  .f-val{font-size:12pt; font-weight:600;}
+
+  .f-desc{margin-top:14px; font-size:10pt; line-height:1.5; color:#444;
+    border-left:3px solid #F5813C; padding-left:11px;}
+
+  .f-preco{margin-top:auto; padding-top:16px; display:flex; align-items:baseline;
+    justify-content:space-between; border-top:2px solid #141414;}
+  .f-preco-rot{font-size:11pt; color:#666; text-transform:uppercase; letter-spacing:0.08em;}
+  .f-preco-val{font-size:34pt; font-weight:800; letter-spacing:-0.02em;}
+
+  .f-rodape{margin-top:10px; text-align:center; font-size:10pt; color:#555;
+    border-top:1px solid #e6e6e6; padding-top:8px;}
+</style></head><body>
+${veiculos.map(htmlDaFicha).join('')}
+</body></html>`);
+  doc.close();
+
+  // Espera as fotos carregarem: sem isso a folha sai com o espaço em branco.
+  const imprimir = () => {
+    try{
+      quadro.contentWindow.focus();
+      quadro.contentWindow.print();
+    }catch(err){
+      console.error('Falha ao imprimir', err);
+      showToast('Não foi possível abrir a impressão');
+    }
+    setTimeout(()=>quadro.remove(), 1500);
+  };
+
+  const imgs = [...doc.images];
+  if(!imgs.length){ setTimeout(imprimir, 120); return; }
+
+  let faltam = imgs.length;
+  let respondido = false;
+  const pronto = () => { if(--faltam <= 0 && !respondido){ respondido = true; setTimeout(imprimir, 120); } };
+  imgs.forEach(img => {
+    if(img.complete) pronto();
+    else { img.addEventListener('load', pronto); img.addEventListener('error', pronto); }
+  });
+  // Rede lenta ou foto quebrada: imprime assim mesmo depois de 6 segundos
+  setTimeout(()=>{ if(!respondido){ respondido = true; imprimir(); } }, 6000);
+
+  showToast(`Preparando ${veiculos.length} ficha${veiculos.length>1?'s':''}...`);
 }
 
 function renderCardFinanciamento(){
@@ -6039,13 +6301,217 @@ async function pedirPermissaoNotificacao(){
   if(state.activeView==='config') renderConfig();
 }
 
-document.getElementById('globalSearch').addEventListener('keydown', e=>{
-  if(e.key==='Enter' && e.target.value.trim()){
-    state.vehicleFilter.termo = e.target.value.trim();
-    state.vehicleFilter.status = 'todos';
-    goToView('estoque');
+/* ===================== BUSCA GLOBAL =====================
+   Procura em veículos, clientes, vendas e nas telas do sistema, mostrando
+   os resultados enquanto o lojista digita.
+
+   Respeita o perfil de acesso: vendedor não vê venda de colega nem tela
+   restrita. A conferência é a mesma usada no resto do sistema (pode()),
+   e os dados financeiros já não chegam ao navegador dele.
+   ========================================================= */
+
+/* Tira acento e caixa, para "veiculo" achar "veículo" e "ONIX" achar "Onix". */
+function normalizarBusca(v){
+  return String(v || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().trim();
+}
+
+/* Destaca o trecho procurado no resultado. */
+function destacar(texto, termo){
+  const t = String(texto || '');
+  if(!termo) return esc(t);
+  const alvo = normalizarBusca(t);
+  const i = alvo.indexOf(normalizarBusca(termo));
+  if(i === -1) return esc(t);
+  return esc(t.slice(0, i)) + '<mark>' + esc(t.slice(i, i + termo.length)) + '</mark>' + esc(t.slice(i + termo.length));
+}
+
+const BUSCA_TELAS = [
+  { view:'dashboard',   nome:'Dashboard',        sub:'Panorama da loja' },
+  { view:'estoque',     nome:'Estoque',          sub:'Veículos cadastrados' },
+  { view:'anuncios',    nome:'Anúncios',         sub:'Portais e captação de leads' },
+  { view:'crm',         nome:'CRM · Leads',      sub:'Funil de atendimento' },
+  { view:'vendas',      nome:'Vendas',           sub:'Vendas e pós-venda' },
+  { view:'fiscal',      nome:'Nota fiscal',      sub:'Emissão de NF-e' },
+  { view:'agenda',      nome:'Agenda',           sub:'Tarefas e compromissos' },
+  { view:'ferramentas', nome:'Ferramentas',      sub:'Simuladores e ficha do veículo' },
+  { view:'custos',      nome:'Custos',           sub:'Custo dos veículos' },
+  { view:'financeiro',  nome:'Financeiro',       sub:'Entradas, saídas e contas' },
+  { view:'ipva',        nome:'IPVA',             sub:'Situação do IPVA do estoque' },
+  { view:'relatorios',  nome:'Relatórios',       sub:'Resultados da loja' },
+  { view:'planos',      nome:'Planos',           sub:'Assinatura do carwoo' },
+  { view:'config',      nome:'Configurações',    sub:'Loja, equipe e preferências' },
+];
+
+const BUSCA_MAX_POR_GRUPO = 5;
+
+function buscarGlobal(termo){
+  const t = normalizarBusca(termo);
+  if(t.length < 2) return [];
+  const casa = (...campos) => campos.some(c => normalizarBusca(c).includes(t));
+  const grupos = [];
+
+  // ---- Veículos ----
+  const veiculos = state.vehicles.filter(v =>
+    casa(v.marca, v.modelo, v.versao, v.placa, v.chassi, `${v.anoFab}/${v.anoMod}`)
+  );
+  if(veiculos.length) grupos.push({
+    rotulo:'Veículos', total:veiculos.length,
+    itens: veiculos.slice(0, BUSCA_MAX_POR_GRUPO).map(v => ({
+      icone:'i-car',
+      titulo:`${v.marca} ${v.modelo}${v.versao ? ' ' + v.versao : ''}`,
+      sub:`${v.placa || 'sem placa'} · ${v.anoFab}/${v.anoMod} · ${STATUS_DEFS[v.status]?.label || v.status} · ${brl(v.preco)}`,
+      acao: () => { goToView('estoque'); setTimeout(()=>openVehicleModal(v.id), 60); },
+    })),
+  });
+
+  // ---- Clientes no funil ----
+  const leads = state.leads.filter(l => casa(l.nome, l.telefone, l.email));
+  if(leads.length) grupos.push({
+    rotulo:'Clientes no funil', total:leads.length,
+    itens: leads.slice(0, BUSCA_MAX_POR_GRUPO).map(l => {
+      const carro = vehicleById(l.veiculoId);
+      return {
+        icone:'i-users',
+        titulo:l.nome,
+        sub:`${l.telefone ? exibirTelefone(l.telefone) : 'sem telefone'}${carro ? ' · interesse em ' + carro.marca + ' ' + carro.modelo : ''}`,
+        acao: () => { goToView('crm'); setTimeout(()=>openLeadModal(l.id), 60); },
+      };
+    }),
+  });
+
+  // ---- Compradores (vendas) ----
+  // Vendedor só encontra as próprias vendas, igual à tela de Vendas.
+  const vendasVisiveis = pode('todasVendas')
+    ? state.sales
+    : state.sales.filter(s => s.vendedor === state.usuarioAtual.nome);
+  const vendas = vendasVisiveis.filter(s => casa(s.cliente, s.telefone, s.cpf, s.veiculo));
+  if(vendas.length) grupos.push({
+    rotulo:'Compradores', total:vendas.length,
+    itens: vendas.slice(0, BUSCA_MAX_POR_GRUPO).map(s => ({
+      icone:'i-cash',
+      titulo:s.cliente,
+      sub:`${s.veiculo} · vendido em ${s.data}${s.cpf ? ' · ' + exibirDocumento(s.cpf) : ''}`,
+      acao: () => { goToView('vendas'); setTimeout(()=>openPosVendaModal(s.id), 60); },
+    })),
+  });
+
+  // ---- Telas ----
+  const telas = BUSCA_TELAS.filter(x => {
+    const exige = VIEWS_RESTRITAS[x.view];
+    if(exige && !pode(exige)) return false;
+    return casa(x.nome, x.sub);
+  });
+  if(telas.length) grupos.push({
+    rotulo:'Ir para', total:telas.length,
+    itens: telas.slice(0, BUSCA_MAX_POR_GRUPO).map(x => ({
+      icone:'i-link', titulo:x.nome, sub:x.sub,
+      acao: () => goToView(x.view),
+    })),
+  });
+
+  return grupos;
+}
+
+let buscaItens = [];      // lista plana, para navegar com as setas
+let buscaIndice = -1;
+
+function renderBusca(termo){
+  const caixa = document.getElementById('buscaResultados');
+  if(!caixa) return;
+  const grupos = buscarGlobal(termo);
+  buscaItens = grupos.flatMap(g => g.itens);
+  buscaIndice = -1;
+
+  if(normalizarBusca(termo).length < 2){
+    caixa.classList.remove('open');
+    caixa.innerHTML = '';
+    return;
   }
-});
+
+  if(!grupos.length){
+    caixa.innerHTML = `<div class="busca-vazio">Nada encontrado para <b>${esc(termo)}</b>.<br>Tente a placa, o modelo ou o nome do cliente.</div>`;
+    caixa.classList.add('open');
+    return;
+  }
+
+  let n = 0;
+  caixa.innerHTML = grupos.map(g => {
+    const cabecalho = `<div class="busca-grupo">${g.rotulo}${g.total > g.itens.length ? ` · ${g.itens.length} de ${g.total}` : ''}</div>`;
+    const linhas = g.itens.map(it => {
+      const i = n++;
+      return `<div class="busca-item" data-i="${i}" onclick="abrirResultadoBusca(${i})">
+        <div class="bi-icone"><svg><use href="#${it.icone}"/></svg></div>
+        <div class="bi-txt">
+          <div class="bi-titulo">${destacar(it.titulo, termo)}</div>
+          <div class="bi-sub">${destacar(it.sub, termo)}</div>
+        </div>
+      </div>`;
+    }).join('');
+    return cabecalho + linhas;
+  }).join('') + `<div class="busca-rodape"><span><kbd>↑</kbd><kbd>↓</kbd> navegar</span><span><kbd>Enter</kbd> abrir</span><span><kbd>Esc</kbd> fechar</span></div>`;
+
+  caixa.classList.add('open');
+}
+
+function abrirResultadoBusca(i){
+  const item = buscaItens[i];
+  if(!item) return;
+  fecharBusca();
+  document.getElementById('globalSearch').value = '';
+  item.acao();
+}
+
+function fecharBusca(){
+  const caixa = document.getElementById('buscaResultados');
+  if(caixa){ caixa.classList.remove('open'); caixa.innerHTML = ''; }
+  buscaItens = []; buscaIndice = -1;
+}
+
+function destacarItemBusca(novo){
+  const itens = [...document.querySelectorAll('.busca-item')];
+  if(!itens.length) return;
+  buscaIndice = (novo + itens.length) % itens.length;
+  itens.forEach(el => el.classList.remove('ativo'));
+  const alvo = itens[buscaIndice];
+  alvo.classList.add('ativo');
+  alvo.scrollIntoView({ block:'nearest' });
+}
+
+(function ligarBuscaGlobal(){
+  const campo = document.getElementById('globalSearch');
+  if(!campo) return;
+
+  campo.addEventListener('input', e => renderBusca(e.target.value));
+  campo.addEventListener('focus', e => { if(e.target.value) renderBusca(e.target.value); });
+
+  campo.addEventListener('keydown', e => {
+    const aberto = document.getElementById('buscaResultados')?.classList.contains('open');
+
+    if(e.key === 'Escape'){ fecharBusca(); campo.blur(); return; }
+
+    if(aberto && e.key === 'ArrowDown'){ e.preventDefault(); destacarItemBusca(buscaIndice + 1); return; }
+    if(aberto && e.key === 'ArrowUp'){ e.preventDefault(); destacarItemBusca(buscaIndice - 1); return; }
+
+    if(e.key === 'Enter'){
+      e.preventDefault();
+      if(aberto && buscaIndice >= 0){ abrirResultadoBusca(buscaIndice); return; }
+      // Sem resultado escolhido: cai no comportamento antigo, filtrar o estoque
+      const termo = campo.value.trim();
+      if(!termo) return;
+      fecharBusca();
+      state.vehicleFilter.termo = termo;
+      state.vehicleFilter.status = 'todos';
+      goToView('estoque');
+    }
+  });
+
+  // Clique fora fecha
+  document.addEventListener('click', e => {
+    if(!e.target.closest('.search-box')) fecharBusca();
+  });
+})();
 
 /* ===================== MENU MOBILE ===================== */
 function abrirMenu(){
