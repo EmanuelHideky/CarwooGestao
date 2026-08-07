@@ -2,7 +2,10 @@
    Guarda a interface em cache para o app abrir mesmo sem internet.
    Ao publicar uma versão nova, troque o número em CACHE_VERSION. */
 
-const CACHE_VERSION = 'carwoo-v2';
+// v3: icones da marca carwoo. Trocar este numero e o que faz os aparelhos
+// jogarem fora o cache antigo - sem isso, quem ja abriu o app continua
+// vendo os arquivos velhos para sempre.
+const CACHE_VERSION = 'carwoo-v3';
 const ARQUIVOS_BASE = [
   './',
   './manifest.json',
