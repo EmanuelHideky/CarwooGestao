@@ -6,12 +6,15 @@
 // jogarem fora o cache antigo - sem isso, quem ja abriu o app continua
 // vendo os arquivos velhos para sempre.
 const CACHE_VERSION = 'carwoo-v3';
+// Os "?v=3" acompanham os mesmos enderecos usados no index.html e no
+// manifest. Precisam ser iguais, senao o app guardaria uma copia e pediria
+// outra, baixando duas vezes o mesmo arquivo.
 const ARQUIVOS_BASE = [
   './',
-  './manifest.json',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-  './icons/apple-touch-icon.png',
+  './manifest.json?v=3',
+  './icons/icon-192.png?v=3',
+  './icons/icon-512.png?v=3',
+  './icons/apple-touch-icon.png?v=3',
 ];
 
 // Instala e guarda os arquivos da interface
