@@ -5723,28 +5723,122 @@ function assinarPlano(id){
       </div>
       <p class="cell-muted" style="margin-top:6px;">Você tem 14 dias de teste antes da primeira cobrança. Pode cancelar a qualquer momento.</p>
     </div>
-    <div class="form-field" style="margin-bottom:14px;">
-      <label>Forma de pagamento</label>
-      <select id="pagForma" class="select"><option>Pix</option><option>Cartão de crédito</option><option>Boleto</option></select>
+    <div style="margin-bottom:14px; font-size:12.5px; line-height:1.55;" class="cell-muted">
+      A forma de pagamento — Pix, boleto ou cartão — é escolhida na página segura
+      do provedor, depois de iniciar o teste. Dados de cartão nunca passam pelo carwoo.
     </div>
-    <div style="background:var(--warning-soft); border-radius:8px; padding:12px 14px; display:flex; gap:10px; align-items:flex-start;">
-      <svg style="width:16px;height:16px;stroke:var(--warning); flex-shrink:0; margin-top:2px;"><use href="#i-alert"/></svg>
-      <p style="font-size:12px; color:var(--warning); line-height:1.5;">Esta tela é a vitrine do plano. A cobrança recorrente de verdade só acontece com um gateway de pagamento contratado (Asaas, Vindi, Iugu, Pagar.me, Mercado Pago ou Stripe) — os dados do cartão são digitados no checkout do gateway, nunca aqui.</p>
-    </div>
+    ${avisoDaCobranca()}
   `;
   document.getElementById('modalFooter').innerHTML = `
     <button class="btn" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-primary" onclick="confirmarAssinatura('${id}')"><svg><use href="#i-check"/></svg>Iniciar teste de 14 dias</button>`;
+    <button class="btn btn-primary" id="btnAssinar" onclick="confirmarAssinatura('${id}')"><svg><use href="#i-check"/></svg>Iniciar teste de 14 dias</button>`;
   openModal();
 }
-function confirmarAssinatura(id){
-  state.assinatura.plano = id;
-  state.assinatura.status = 'teste';
-  state.assinatura.ciclo = cicloSelecionado;
-  state.assinatura.diasRestantesTeste = 14;
-  closeModal();
-  renderPlanos();
-  showToast(`Plano ${state.planos.find(p=>p.id===id).nome} ativado em teste`);
+
+/* Aviso honesto sobre o estado da cobrança. Enquanto o gateway não estiver
+   ligado, a tela diz isso com todas as letras em vez de simular contratação. */
+function avisoDaCobranca(){
+  const c = window.cobrancaAssinatura;
+  if(modoDemo){
+    return `<div style="background:var(--surface-2); border-radius:8px; padding:12px 14px;">
+      <p class="cell-muted" style="font-size:12px; line-height:1.5;">Você está na demonstração. Nenhuma cobrança é gerada aqui.</p>
+    </div>`;
+  }
+  if(c && c.ativo){
+    const teste = c.ambiente === 'teste';
+    return `<div style="background:${teste?'var(--warning-soft)':'var(--success-soft)'}; border-radius:8px; padding:12px 14px; display:flex; gap:10px; align-items:flex-start;">
+      <svg style="width:16px;height:16px;stroke:${teste?'var(--warning)':'var(--success)'}; flex-shrink:0; margin-top:2px;"><use href="#${teste?'i-alert':'i-check'}"/></svg>
+      <p style="font-size:12px; color:${teste?'var(--warning)':'var(--success)'}; line-height:1.5;">
+        ${teste
+          ? 'Cobrança em <b>ambiente de teste</b>: o pagamento é fictício e nenhum valor é debitado de verdade.'
+          : 'Cobrança ativa. Ao iniciar o teste, o link de pagamento aparece aqui e também chega por e-mail.'}
+      </p>
+    </div>`;
+  }
+  return `<div style="background:var(--warning-soft); border-radius:8px; padding:12px 14px; display:flex; gap:10px; align-items:flex-start;">
+    <svg style="width:16px;height:16px;stroke:var(--warning); flex-shrink:0; margin-top:2px;"><use href="#i-alert"/></svg>
+    <p style="font-size:12px; color:var(--warning); line-height:1.5;">
+      A cobrança automática ainda <b>não está ativa</b> neste servidor. O plano fica
+      registrado e o teste de 14 dias começa, mas nenhuma cobrança é gerada.
+    </p>
+  </div>`;
+}
+
+async function confirmarAssinatura(id){
+  const plano = state.planos.find(p=>p.id===id);
+  const botao = document.getElementById('btnAssinar');
+  if(botao){ botao.disabled = true; botao.textContent = 'Registrando...'; }
+
+  // Na demonstração não há servidor: mantém o comportamento antigo
+  if(modoDemo){
+    state.assinatura.plano = id;
+    state.assinatura.status = 'teste';
+    state.assinatura.ciclo = cicloSelecionado;
+    state.assinatura.diasRestantesTeste = 14;
+    closeModal(); renderPlanos();
+    showToast(`Plano ${plano.nome} ativado em teste`);
+    return;
+  }
+
+  try{
+    const r = await chamarApi('/billing/subscribe', {
+      method:'POST',
+      body: JSON.stringify({ planId: id, ciclo: cicloSelecionado }),
+    });
+
+    state.assinatura.plano = id;
+    state.assinatura.status = r?.status || 'teste';
+    state.assinatura.ciclo = cicloSelecionado;
+    if(r?.diasRestantesTeste !== undefined) state.assinatura.diasRestantesTeste = r.diasRestantesTeste;
+
+    closeModal();
+    renderPlanos();
+
+    if(r?.linkPagamento) mostrarLinkPagamento(plano, r);
+    else if(r?.aviso) showToast(r.aviso);
+    else showToast(`Plano ${plano.nome} ativado em teste`);
+
+    registrarAtividade({ icone:'i-award', cor:'info', titulo:'Plano contratado',
+      sub:`${plano.nome} · ${cicloSelecionado}` });
+  }catch(err){
+    if(botao){ botao.disabled = false; botao.textContent = 'Iniciar teste de 14 dias'; }
+    showToast(err.semConexao ? 'Servidor fora do ar' : (err.message || 'Não foi possível contratar agora'));
+  }
+}
+
+/* Mostra o link onde o lojista paga. Fica numa tela própria porque é o
+   passo que ele precisa concluir — some num aviso rápido, ele perde. */
+function mostrarLinkPagamento(plano, r){
+  document.getElementById('modalTitle').textContent = 'Pagamento da assinatura';
+  document.getElementById('modalBox').classList.remove('wide');
+  document.getElementById('modalBody').innerHTML = `
+    <div style="background:var(--success-soft); border-radius:9px; padding:13px 15px; margin-bottom:16px;">
+      <div style="font-weight:700; color:var(--success); font-size:13.5px;">Teste de 14 dias começou</div>
+      <p class="cell-muted" style="margin-top:5px; line-height:1.5;">
+        Plano ${esc(plano.nome)} · ${esc(cicloSelecionado)}. A primeira cobrança só vence
+        no fim do teste. Você pode cancelar antes disso sem pagar nada.
+      </p>
+    </div>
+    ${r.ambienteCobranca === 'teste' ? `
+    <div style="background:var(--warning-soft); border-radius:8px; padding:11px 13px; margin-bottom:14px;">
+      <p style="font-size:12px; color:var(--warning); line-height:1.5;">
+        <b>Ambiente de teste.</b> Este pagamento é fictício, nenhum valor é debitado.
+      </p>
+    </div>` : ''}
+    <p style="font-size:13px; line-height:1.6; margin-bottom:14px;">
+      Escolha como pagar — Pix, boleto ou cartão — na página segura do provedor:
+    </p>
+    <a href="${esc(r.linkPagamento)}" target="_blank" rel="noopener"
+       class="btn btn-primary" style="width:100%; justify-content:center; text-decoration:none;">
+      <svg><use href="#i-link"/></svg>Abrir página de pagamento
+    </a>
+    <p class="cell-muted" style="margin-top:12px; font-size:11.5px; line-height:1.5;">
+      O link também chega no e-mail da loja. Assim que o pagamento for confirmado,
+      o plano é ativado automaticamente.
+    </p>`;
+  document.getElementById('modalFooter').innerHTML =
+    `<button class="btn btn-primary" onclick="closeModal()">Fechar</button>`;
+  openModal();
 }
 function cancelarAssinatura(){
   document.getElementById('modalTitle').textContent = "Cancelar assinatura";
@@ -5760,10 +5854,25 @@ function cancelarAssinatura(){
     <button class="btn btn-danger" onclick="confirmarCancelamento()">Confirmar cancelamento</button>`;
   openModal();
 }
-function confirmarCancelamento(){
-  state.assinatura.status = 'cancelada';
-  closeModal(); renderPlanos();
-  showToast('Assinatura cancelada. Acesso mantido até o fim do período pago.');
+async function confirmarCancelamento(){
+  if(modoDemo){
+    state.assinatura.status = 'cancelada';
+    closeModal(); renderPlanos();
+    showToast('Assinatura cancelada. Acesso mantido até o fim do período pago.');
+    return;
+  }
+  try{
+    // Cancela no servidor, que por sua vez cancela no gateway. Só mudar
+    // aqui deixaria a cobrança correndo todo mês.
+    const r = await chamarApi('/billing/cancel', { method:'POST' });
+    state.assinatura.status = 'cancelada';
+    closeModal(); renderPlanos();
+    showToast(r?.aviso || 'Assinatura cancelada. Acesso mantido até o fim do período pago.');
+    registrarAtividade({ icone:'i-alert', cor:'danger', titulo:'Assinatura cancelada', sub:'Acesso até o fim do período pago' });
+  }catch(err){
+    showToast(err.semConexao ? 'Servidor fora do ar' : (err.message || 'Não foi possível cancelar agora'));
+    return;
+  }
 }
 
 function renderConfig(){
@@ -6854,6 +6963,9 @@ async function verificarServidor(){
     // Guarda para a tela de cadastro poder avisar antes de o lojista perder
     // tempo escolhendo fotos que não seriam salvas.
     window.armazenamentoFotos = saude?.fotos || null;
+    // Idem para a cobrança: a tela de Planos avisa se o pagamento ainda
+    // não está ligado, em vez de fingir que a assinatura foi contratada.
+    window.cobrancaAssinatura = saude?.cobranca || null;
     box.innerHTML = `<span class="ponto" style="background:var(--success)"></span>Servidor conectado`;
   }catch{
     window.armazenamentoFotos = null;

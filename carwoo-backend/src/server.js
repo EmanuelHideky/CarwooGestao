@@ -53,6 +53,7 @@ app.get('/api/health', (req, res) => {
     servico: 'carwoo-api',
     horario: new Date().toISOString(),
     fotos: require('./storage').descrever(),
+    cobranca: require('./billing-gateway').descrever(),
   });
 });
 
