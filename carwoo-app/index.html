@@ -2244,20 +2244,36 @@ function salvarCredencialPortal(portalId, botao){
 }
 
 /* Convite de membro da equipe */
+/* Senha provisória do funcionário.
+   Sem as letras e números que se confundem ao ditar (O/0, I/1, L) — o dono
+   costuma passar isso por telefone ou WhatsApp. O tracinho no meio é só
+   para facilitar a leitura; conta como caractere normal. */
+function gerarSenhaProvisoria(){
+  const alfabeto = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const n = new Uint32Array(10);
+  crypto.getRandomValues(n);
+  const s = [...n].map(x => alfabeto[x % alfabeto.length]).join('');
+  return s.slice(0,5) + '-' + s.slice(5);
+}
+
 function openConviteModal(){
   document.getElementById('modalTitle').textContent = "Convidar membro da equipe";
   document.getElementById('modalBox').classList.remove('wide');
   document.getElementById('modalBody').innerHTML = `
     <div class="form-grid">
       <div class="form-field full"><label>Nome</label><input id="cvNome" class="input" placeholder="Nome completo"></div>
-      <div class="form-field full"><label>E-mail</label><input id="cvEmail" class="input" type="email" placeholder="pessoa@sualoja.com.br"></div>
+      <div class="form-field full"><label>E-mail</label><input id="cvEmail" class="input" type="email" placeholder="pessoa@sualoja.com.br"><span class="cell-muted" style="font-size:11px;">É com este e-mail que a pessoa entra no sistema.</span></div>
+      <div class="form-field full"><label>WhatsApp (opcional)</label><input id="cvTelefone" class="input" placeholder="11999998888" inputmode="numeric"><span class="cell-muted" style="font-size:11px;">Serve para você mandar os dados de acesso em um clique. Não fica guardado.</span></div>
       <div class="form-field"><label>Nível de acesso</label>
         <select id="cvPerfil" class="select">${Object.entries(PERFIS).filter(([k])=>k!=='dono').map(([k,d])=>`<option value="${k}">${d.label}</option>`).join('')}</select>
       </div>
       <div class="form-field"><label>Meta de vendas por mês</label><input id="cvMeta" type="number" class="input" value="8"></div>
       <div class="form-field full"><label>Senha provisória</label>
-        <input id="cvSenha" class="input" value="carwoo${Math.floor(1000+Math.random()*9000)}">
-        <span class="cell-muted" style="font-size:11px;">Passe esta senha para a pessoa. Ela deve trocá-la no primeiro acesso.</span>
+        <div style="display:flex; gap:7px;">
+          <input id="cvSenha" class="input mono" value="${gerarSenhaProvisoria()}" style="flex:1;">
+          <button type="button" class="btn btn-sm" onclick="document.getElementById('cvSenha').value = gerarSenhaProvisoria()">Gerar outra</button>
+        </div>
+        <span class="cell-muted" style="font-size:11px;">Depois de criar o acesso, o sistema monta a mensagem pronta para você enviar.</span>
       </div>
     </div>
     <div id="cvPreview" style="margin-top:14px;"></div>`;
@@ -2276,12 +2292,14 @@ function previewConvite(){
       <p class="cell-muted" style="line-height:1.55;">${PERFIS[perfil].descricao}</p>
     </div>`;
 }
-function salvarConvite(){
+async function salvarConvite(){
   const nome = document.getElementById('cvNome').value.trim();
   const email = document.getElementById('cvEmail').value.trim();
-  const senha = document.getElementById('cvSenha').value;
+  const senha = document.getElementById('cvSenha').value.trim();
+  const telefone = (document.getElementById('cvTelefone')?.value || '').replace(/\D/g,'');
   if(!nome || !email){ showToast('Informe o nome e o e-mail'); return; }
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ showToast('E-mail inválido'); return; }
+  if(senha.length < 8){ showToast('A senha provisória precisa de ao menos 8 caracteres'); return; }
   if(state.team.some(t=>t.email === email)){ showToast('Já existe alguém com esse e-mail'); return; }
 
   const perfil = document.getElementById('cvPerfil').value;
@@ -2292,18 +2310,96 @@ function salvarConvite(){
     meta: parseInt(document.getElementById('cvMeta').value) || 8,
     vendas: 0, comissao: 0,
   };
-  state.team.push(novo);
-  closeModal();
-  renderConfig();
-  showToast(`Acesso criado para ${nome.split(' ')[0]}`);
-  sincronizar('novo membro', async ()=>{
+
+  if(modoDemo){
+    state.team.push(novo);
+    closeModal(); renderConfig();
+    mostrarAcessoCriado({ nome, email, senha, telefone, perfil });
+    return;
+  }
+
+  /* Espera o servidor confirmar ANTES de mostrar a senha ao dono. Se
+     mostrasse antes e a gravação falhasse, ele entregaria ao funcionário
+     um acesso que não existe — e o erro só apareceria no primeiro login. */
+  const botao = document.querySelector('#modalFooter .btn-primary');
+  if(botao){ botao.disabled = true; botao.textContent = 'Criando...'; }
+  try{
     const r = await chamarApi('/team', { method:'POST', body: JSON.stringify({
       nome, email, perfil, cargo: novo.cargo, senha, meta: novo.meta,
     }) });
-    if(r?.membro?.id){ novo.id = r.membro.id; renderConfig(); }
-  });
-  registrarAtividade({ icone:'i-users', cor:'info', titulo:'Acesso criado',
-    sub:`${nome} · ${PERFIS[perfil].label}` });
+    if(r?.membro?.id) novo.id = r.membro.id;
+    state.team.push(novo);
+    closeModal(); renderConfig();
+    // Se o servidor gerou a senha (o dono deixou em branco), vale a dele
+    mostrarAcessoCriado({ nome, email, senha: r?.senhaProvisoria || senha, telefone, perfil });
+    registrarAtividade({ icone:'i-users', cor:'info', titulo:'Acesso criado',
+      sub:`${nome} · ${PERFIS[perfil].label}` });
+  }catch(err){
+    if(botao){ botao.disabled = false; botao.innerHTML = '<svg><use href="#i-check"/></svg>Criar acesso'; }
+    showToast(err.semConexao ? 'Servidor fora do ar — o acesso não foi criado' : (err.message || 'Não foi possível criar o acesso'));
+  }
+}
+
+/* Monta a mensagem que o dono manda para o funcionário.
+   Não depende de e-mail: o dono já fala com essa pessoa todo dia. */
+function textoDoAcesso({ nome, email, senha }){
+  return [
+    `Oi ${nome.split(' ')[0]}, seu acesso ao sistema da ${state.loja.nome || 'loja'} está pronto.`,
+    '',
+    `Endereço: ${location.origin}`,
+    `E-mail: ${email}`,
+    `Senha provisória: ${senha}`,
+    '',
+    'Troque a senha assim que entrar.',
+  ].join('\n');
+}
+
+/* Tela que aparece depois de criar o acesso. A senha só é mostrada aqui,
+   uma vez — depois disso nem o dono consegue vê-la de novo. */
+function mostrarAcessoCriado({ nome, email, senha, telefone, perfil }){
+  const texto = textoDoAcesso({ nome, email, senha });
+  window.__acessoCriado = texto;
+
+  document.getElementById('modalTitle').textContent = 'Acesso criado';
+  document.getElementById('modalBox').classList.remove('wide');
+  document.getElementById('modalBody').innerHTML = `
+    <div style="background:var(--success-soft); border-radius:9px; padding:12px 14px; margin-bottom:15px;">
+      <div style="font-weight:700; color:var(--success); font-size:13.5px;">${esc(nome)} já pode entrar</div>
+      <p class="cell-muted" style="margin-top:4px; line-height:1.5;">Nível de acesso: ${PERFIS[perfil].label}.</p>
+    </div>
+
+    <div style="border:1px solid var(--border); border-radius:9px; padding:13px 15px; margin-bottom:14px;">
+      <div style="display:grid; gap:9px;">
+        <div><div class="cell-muted" style="font-size:11px;">Endereço</div><div class="mono" style="font-size:12.5px; word-break:break-all;">${esc(location.origin)}</div></div>
+        <div><div class="cell-muted" style="font-size:11px;">E-mail</div><div class="mono" style="font-size:12.5px; word-break:break-all;">${esc(email)}</div></div>
+        <div><div class="cell-muted" style="font-size:11px;">Senha provisória</div><div class="mono" style="font-size:16px; font-weight:700; letter-spacing:0.04em;">${esc(senha)}</div></div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn btn-primary" style="flex:1; justify-content:center;" onclick="copiarAcesso()"><svg><use href="#i-copy"/></svg>Copiar mensagem</button>
+      ${telefone ? `<a class="btn" style="flex:1; justify-content:center; text-decoration:none;" target="_blank" rel="noopener"
+         href="https://wa.me/55${esc(telefone)}?text=${encodeURIComponent(texto)}"><svg><use href="#i-whatsapp"/></svg>Enviar no WhatsApp</a>` : ''}
+    </div>
+
+    <div style="margin-top:14px; background:var(--warning-soft); border-radius:8px; padding:11px 13px; display:flex; gap:9px; align-items:flex-start;">
+      <svg style="width:15px;height:15px;stroke:var(--warning); flex-shrink:0; margin-top:2px;"><use href="#i-alert"/></svg>
+      <p style="font-size:11.5px; color:var(--warning); line-height:1.5;">
+        Esta senha aparece <b>só agora</b>. Se fechar sem anotar ou enviar, será preciso
+        criar uma nova em Configurações.
+      </p>
+    </div>`;
+  document.getElementById('modalFooter').innerHTML =
+    `<button class="btn btn-primary" onclick="closeModal()">Já enviei</button>`;
+  openModal();
+}
+
+function copiarAcesso(){
+  const texto = window.__acessoCriado || '';
+  navigator.clipboard?.writeText(texto).then(
+    ()=>showToast('Mensagem copiada — é só colar no WhatsApp ou no e-mail'),
+    ()=>showToast('Não foi possível copiar automaticamente')
+  );
 }
 
 /* Configuração do emissor fiscal */
