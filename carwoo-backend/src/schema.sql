@@ -421,3 +421,16 @@ ALTER TABLE tasks ALTER COLUMN prazo TYPE TEXT USING prazo::text;
 -- ============================================================
 ALTER TABLE sales ADD COLUMN IF NOT EXISTS cpf   TEXT;
 ALTER TABLE sales ADD COLUMN IF NOT EXISTS email TEXT;
+
+-- ============================================================
+-- Liga o lancamento financeiro a venda que o originou
+-- ------------------------------------------------------------
+-- Sem esta ligacao nao havia como desfazer uma venda: o dinheiro da venda
+-- e os custos de garantia ficavam no financeiro para sempre, mesmo depois
+-- de o carro voltar para o estoque. O ON DELETE CASCADE faz o lancamento
+-- sumir junto com a venda.
+-- Lancamentos manuais continuam com sale_id nulo, como devem.
+-- ============================================================
+ALTER TABLE finance_entries ADD COLUMN IF NOT EXISTS sale_id INTEGER
+  REFERENCES sales(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_finance_sale ON finance_entries(sale_id);

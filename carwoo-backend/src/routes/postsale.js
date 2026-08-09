@@ -53,9 +53,9 @@ router.post('/', asyncRoute(async (req, res) => {
 
     // O custo de garantia também é uma saída de caixa
     await cliente.query(
-      `INSERT INTO finance_entries (store_id, tipo, descricao, categoria, valor, data_lanc)
-       VALUES ($1,'saida',$2,'Garantia e pós-venda',$3, COALESCE($4, CURRENT_DATE))`,
-      [req.user.storeId, `Pós-venda - ${b.desc} (${venda.cliente_nome})`, paraNumero(b.valor), paraDataISO(b.data)]
+      `INSERT INTO finance_entries (store_id, tipo, descricao, categoria, valor, data_lanc, sale_id)
+       VALUES ($1,'saida',$2,'Garantia e pós-venda',$3, COALESCE($4, CURRENT_DATE),$5)`,
+      [req.user.storeId, `Pós-venda - ${b.desc} (${venda.cliente_nome})`, paraNumero(b.valor), paraDataISO(b.data), venda.id]
     );
 
     await cliente.query('COMMIT');

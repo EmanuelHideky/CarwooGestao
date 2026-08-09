@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { asyncRoute, paraNumero, paraDataISO } = require('../helpers');
-const { filtrarVenda, filtroDeVendas, pode } = require('../middleware/role');
+const { filtrarVenda, filtroDeVendas, pode, exigirPermissao } = require('../middleware/role');
 const { cpfValido, apenasDigitos } = require('../validadores');
 
 const router = express.Router();
@@ -133,15 +133,84 @@ router.post('/', asyncRoute(async (req, res) => {
         [b.leadId, req.user.storeId]
       );
     }
-    // Lança a entrada no financeiro
+    // Lança a entrada no financeiro, amarrada à venda para poder ser
+    // desfeita junto se a venda for cancelada
     await cliente.query(
-      `INSERT INTO finance_entries (store_id, tipo, descricao, categoria, valor, data_lanc)
-       VALUES ($1,'entrada',$2,'Venda de veículo',$3, COALESCE($4, CURRENT_DATE))`,
-      [req.user.storeId, `Venda - ${b.clienteNome}`, paraNumero(b.valor), paraDataISO(b.data)]
+      `INSERT INTO finance_entries (store_id, tipo, descricao, categoria, valor, data_lanc, sale_id)
+       VALUES ($1,'entrada',$2,'Venda de veículo',$3, COALESCE($4, CURRENT_DATE),$5)`,
+      [req.user.storeId, `Venda - ${b.clienteNome}`, paraNumero(b.valor), paraDataISO(b.data), rows[0].id]
     );
+
+    // A comissão é despesa da loja. A tela já mostrava isso, mas o servidor
+    // não gravava: ao recarregar, a comissão sumia do financeiro e o lucro
+    // aparecia maior do que é.
+    const comissao = paraNumero(b.comissao) || 0;
+    if (comissao > 0) {
+      const { rows: vend } = await cliente.query(
+        'SELECT nome FROM users WHERE id = $1',
+        [b.vendedorId || req.user.id]
+      );
+      await cliente.query(
+        `INSERT INTO finance_entries (store_id, tipo, descricao, categoria, valor, data_lanc, sale_id)
+         VALUES ($1,'saida',$2,'Comissão',$3, COALESCE($4, CURRENT_DATE),$5)`,
+        [req.user.storeId, `Comissão - ${vend[0]?.nome || 'vendedor'}`, comissao,
+         paraDataISO(b.data), rows[0].id]
+      );
+    }
 
     await cliente.query('COMMIT');
     res.status(201).json(mapear(rows[0]));
+  } catch (err) {
+    await cliente.query('ROLLBACK');
+    throw err;
+  } finally {
+    cliente.release();
+  }
+}));
+
+// DELETE /api/sales/:id -> desfaz a venda e devolve o carro ao estoque
+//
+// Acontece de verdade em revenda: financiamento negado, comprador desiste,
+// negócio cai. Sem isto, o carro voltava para o estoque mas a venda
+// continuava contando no faturamento e no lucro - dinheiro que nao existe.
+//
+// Só quem enxerga o resultado financeiro pode desfazer: apagar uma venda
+// muda o faturamento do mes.
+router.delete('/:id', exigirPermissao('margens'), asyncRoute(async (req, res) => {
+  const cliente = await db.pool.connect();
+  try {
+    await cliente.query('BEGIN');
+
+    const { rows } = await cliente.query(
+      'SELECT * FROM sales WHERE id = $1 AND store_id = $2',
+      [req.params.id, req.user.storeId]
+    );
+    const venda = rows[0];
+    if (!venda) {
+      await cliente.query('ROLLBACK');
+      return res.status(404).json({ erro: 'Venda não encontrada.' });
+    }
+
+    // Devolve o carro ao estoque antes de apagar a venda: depois do DELETE
+    // o veiculo_id some e nao ha como saber qual carro era.
+    if (venda.veiculo_id) {
+      await cliente.query(
+        `UPDATE vehicles SET status = 'disponivel', atualizado_em = now()
+          WHERE id = $1 AND store_id = $2`,
+        [venda.veiculo_id, req.user.storeId]
+      );
+    }
+
+    // O ON DELETE CASCADE leva junto os custos de pos-venda e os
+    // lancamentos financeiros gerados por esta venda.
+    await cliente.query('DELETE FROM sales WHERE id = $1', [venda.id]);
+
+    await cliente.query('COMMIT');
+    res.json({
+      desfeita: true,
+      veiculoId: venda.veiculo_id,
+      mensagem: 'Venda desfeita. O veículo voltou para o estoque e os lançamentos foram removidos.',
+    });
   } catch (err) {
     await cliente.query('ROLLBACK');
     throw err;

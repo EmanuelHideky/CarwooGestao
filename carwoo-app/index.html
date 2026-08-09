@@ -903,6 +903,7 @@ tbody tr:hover{background:var(--surface-2);}
       <div class="navlink" data-view="anuncios"><svg><use href="#i-tag"/></svg>Anúncios</div>
       <div class="navlink" data-view="crm"><svg><use href="#i-users"/></svg>CRM · Leads<span class="count" id="navCountLeads">0</span></div>
       <div class="navlink" data-view="vendas"><svg><use href="#i-cash"/></svg>Vendas</div>
+      <div class="navlink" data-view="comissoes"><svg><use href="#i-award"/></svg>Comissões</div>
       <div class="navlink" data-view="fiscal"><svg><use href="#i-file"/></svg>Nota fiscal</div>
       <div class="navlink" data-view="agenda"><svg><use href="#i-clock"/></svg>Agenda<span class="count" id="navCountTarefas">0</span></div>
       <div class="navlink" data-view="ferramentas"><svg><use href="#i-calc"/></svg>Ferramentas</div>
@@ -972,6 +973,7 @@ tbody tr:hover{background:var(--surface-2);}
       <section class="view" id="view-anuncios"></section>
       <section class="view" id="view-crm"></section>
       <section class="view" id="view-vendas"></section>
+      <section class="view" id="view-comissoes"></section>
       <section class="view" id="view-fiscal"></section>
       <section class="view" id="view-agenda"></section>
       <section class="view" id="view-ferramentas"></section>
@@ -1362,6 +1364,7 @@ function renderView(view){
   else if(view==='anuncios') renderAnuncios();
   else if(view==='crm') renderCRM();
   else if(view==='vendas') renderVendas();
+  else if(view==='comissoes') renderComissoes();
   else if(view==='fiscal') renderFiscal();
   else if(view==='agenda') renderAgenda();
   else if(view==='ferramentas') renderFerramentas();
@@ -1771,6 +1774,21 @@ function saveVehicle(){
       setTimeout(()=>openVendaModal(alvo.id), 120);
       return;
     }
+
+    /* Saiu de "vendido" para outro status. Existe uma venda registrada
+       para este carro, e deixá-la ali significaria o carro no estoque e o
+       dinheiro no faturamento ao mesmo tempo — venda contada duas vezes. */
+    if(eraVendido && data.status !== 'vendido'){
+      const venda = vendaDoVeiculo(alvo.id);
+      if(venda){
+        alvo.status = 'vendido';       // segura até o dono decidir
+        closeModal();
+        renderEstoque();
+        setTimeout(()=>confirmarDesfazerVenda(venda, data.status), 120);
+        return;
+      }
+    }
+
     registrarAtividade({ icone:'i-edit', cor:'info', titulo:'Veículo atualizado', sub:`${alvo.marca} ${alvo.modelo}` });
     showToast('Veículo atualizado com sucesso');
     sincronizar('veículo', ()=>chamarApi(`/vehicles/${alvo.id}`, {
@@ -4167,6 +4185,123 @@ function alterarPrazoGarantia(vendaId){
 function proximoIdVenda(){
   return Math.max(0, ...state.sales.map(s=>s.id)) + 1;
 }
+
+/* Venda registrada para um veículo, se houver. */
+function vendaDoVeiculo(veiculoId){
+  return state.sales.find(s => s.veiculoId === veiculoId) || null;
+}
+
+/* Tirar o carro de "vendido" com uma venda registrada exige decidir o que
+   fazer com ela. Deixar as duas coisas ao mesmo tempo — carro no estoque e
+   dinheiro no faturamento — conta a venda em dobro. */
+function confirmarDesfazerVenda(venda, novoStatus){
+  const veiculo = vehicleById(venda.veiculoId);
+  const rotuloNovo = STATUS_DEFS[novoStatus]?.label || novoStatus;
+  const posVenda = posVendaTotal(venda);
+
+  if(!pode('margens')){
+    document.getElementById('modalTitle').textContent = 'Este veículo tem uma venda registrada';
+    document.getElementById('modalBox').classList.remove('wide');
+    document.getElementById('modalBody').innerHTML = `
+      <p style="font-size:13.5px; line-height:1.6;">
+        Para devolver este carro ao estoque é preciso desfazer a venda, e isso
+        muda o faturamento da loja. Peça ao dono ou ao gerente.
+      </p>`;
+    document.getElementById('modalFooter').innerHTML =
+      `<button class="btn btn-primary" onclick="closeModal(); renderEstoque();">Entendi</button>`;
+    openModal();
+    return;
+  }
+
+  document.getElementById('modalTitle').textContent = 'Desfazer a venda?';
+  document.getElementById('modalBox').classList.remove('wide');
+  document.getElementById('modalBody').innerHTML = `
+    <p style="font-size:13.5px; line-height:1.6; margin-bottom:14px;">
+      Você está devolvendo o <b>${esc(veiculo ? veiculo.marca + ' ' + veiculo.modelo : 'veículo')}</b>
+      para <b>${esc(rotuloNovo)}</b>, mas existe uma venda registrada para ele.
+    </p>
+
+    <div style="border:1px solid var(--border); border-radius:9px; padding:12px 14px; margin-bottom:14px;">
+      <div style="display:grid; gap:7px; font-size:12.5px;">
+        <div style="display:flex; justify-content:space-between;"><span class="cell-muted">Comprador</span><span>${esc(venda.cliente)}</span></div>
+        <div style="display:flex; justify-content:space-between;"><span class="cell-muted">Data</span><span>${esc(venda.data)}</span></div>
+        <div style="display:flex; justify-content:space-between;"><span class="cell-muted">Valor</span><span class="mono">${brl(venda.valor)}</span></div>
+        ${venda.comissao ? `<div style="display:flex; justify-content:space-between;"><span class="cell-muted">Comissão</span><span class="mono">${brl(venda.comissao)}</span></div>` : ''}
+        ${posVenda ? `<div style="display:flex; justify-content:space-between;"><span class="cell-muted">Custos de garantia lançados</span><span class="mono">${brl(posVenda)}</span></div>` : ''}
+      </div>
+    </div>
+
+    <div style="background:var(--danger-soft); border-radius:8px; padding:12px 14px;">
+      <div style="font-weight:700; color:var(--danger); font-size:12.5px; margin-bottom:5px;">O que será removido</div>
+      <ul style="margin:0; padding-left:17px; font-size:12px; color:var(--danger); line-height:1.65;">
+        <li>A venda e o registro do comprador</li>
+        <li>A entrada de ${brl(venda.valor)} no financeiro</li>
+        ${posVenda ? `<li>Os custos de pós-venda lançados (${brl(posVenda)})</li>` : ''}
+        <li>A garantia vinculada a esta venda</li>
+      </ul>
+      <p style="font-size:11.5px; color:var(--danger); margin-top:8px; line-height:1.5;">Não dá para desfazer depois.</p>
+    </div>`;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn" onclick="closeModal(); renderEstoque();">Manter a venda</button>
+    <button class="btn btn-danger" onclick="desfazerVenda(${venda.id}, '${novoStatus}')">Desfazer a venda</button>`;
+  openModal();
+}
+
+async function desfazerVenda(vendaId, novoStatus){
+  const venda = state.sales.find(s => s.id === vendaId);
+  if(!venda) return;
+  const veiculo = vehicleById(venda.veiculoId);
+
+  const aplicarLocal = () => {
+    state.sales = state.sales.filter(s => s.id !== vendaId);
+
+    /* Tira do financeiro o que esta venda gerou. Os textos abaixo são os
+       mesmos que salvarVenda e adicionarPosVenda escrevem ao criar. No
+       servidor isso é automático, pela ligação sale_id. */
+    const descVenda = `Venda - ${venda.veiculo} (${venda.cliente})`;
+    const descComissao = `Comissão - ${venda.vendedor}`;
+    let comissaoRemovida = false;
+    state.financeEntries = state.financeEntries.filter(e => {
+      const d = String(e.desc || '');
+      if(e.cat === 'Venda de veículo' && (d === descVenda || d.includes(venda.cliente))) return false;
+      if(e.cat === 'Garantia e pós-venda' && d.includes(venda.cliente)) return false;
+      // Só a primeira comissão daquele valor: o vendedor pode ter outras
+      if(!comissaoRemovida && e.cat === 'Comissão' && d === descComissao
+         && Math.abs(Number(e.valor) - Number(venda.comissao || 0)) < 0.01){
+        comissaoRemovida = true;
+        return false;
+      }
+      return true;
+    });
+
+    if(veiculo) veiculo.status = novoStatus;
+  };
+
+  if(modoDemo){
+    aplicarLocal();
+    closeModal(); renderEstoque();
+    showToast('Venda desfeita — o veículo voltou para o estoque');
+    return;
+  }
+
+  try{
+    await chamarApi(`/sales/${vendaId}`, { method:'DELETE' });
+    aplicarLocal();
+    // O servidor devolve o carro como "disponivel"; se o dono escolheu
+    // outro status, manda a correção
+    if(veiculo && novoStatus !== 'disponivel'){
+      await chamarApi(`/vehicles/${veiculo.id}`, { method:'PUT', body: JSON.stringify(semFotos(veiculo)) });
+    }
+    closeModal(); renderEstoque();
+    showToast('Venda desfeita — o veículo voltou para o estoque');
+    registrarAtividade({ icone:'i-alert', cor:'danger', titulo:'Venda desfeita',
+      sub:`${venda.veiculo} · ${esc(venda.cliente)} · ${brl(venda.valor)}` });
+  }catch(err){
+    closeModal(); renderEstoque();
+    showToast(err.semConexao ? 'Servidor fora do ar — a venda não foi desfeita'
+                             : (err.message || 'Não foi possível desfazer a venda'));
+  }
+}
 function escolherVeiculoParaVenda(){
   const disponiveis = state.vehicles.filter(v=>v.status!=='vendido');
   if(!disponiveis.length){ showToast('Nenhum veículo disponível no estoque'); return; }
@@ -4677,6 +4812,157 @@ function removerPosVenda(id){
   s.custosPosVenda = (s.custosPosVenda||[]).filter(c=>c.id!==id);
   renderPosVendaLista();
   showToast('Custo removido');
+}
+
+/* ===================== COMISSÕES =====================
+   Cada um vê o que lhe cabe. O vendedor abre e enxerga só o que ele
+   ganhou — o servidor nem envia a comissão dos colegas para ele. Dono e
+   gerente veem a equipe inteira.
+
+   Aqui não aparece custo nem margem: comissão é sobre o valor da venda,
+   e o vendedor não precisa saber quanto a loja lucrou para conferir o
+   próprio pagamento.
+   ====================================================== */
+function comissoesDoVendedor(nome, ref = new Date()){
+  return vendasDoMes(ref).filter(v => v.vendedor === nome);
+}
+
+function historicoDeComissoes(nome, meses = 6){
+  const hoje = new Date();
+  const saida = [];
+  for(let i = meses - 1; i >= 0; i--){
+    const ref = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+    const lista = comissoesDoVendedor(nome, ref);
+    saida.push({
+      rotulo: MESES_CURTO[ref.getMonth()],
+      ano: ref.getFullYear(),
+      qtd: lista.length,
+      comissao: lista.reduce((a, v) => a + (Number(v.comissao) || 0), 0),
+      faturamento: lista.reduce((a, v) => a + (Number(v.valor) || 0), 0),
+    });
+  }
+  return saida;
+}
+
+function renderComissoes(){
+  const eu = state.usuarioAtual.nome;
+  const verEquipe = pode('todasVendas');
+  const alvo = window.comissoesVendedor || eu;
+
+  const historico = historicoDeComissoes(alvo);
+  const mesAtual = historico[historico.length - 1];
+  const mesPassado = historico[historico.length - 2];
+  const variacao = mesPassado && mesPassado.comissao > 0
+    ? ((mesAtual.comissao - mesPassado.comissao) / mesPassado.comissao) * 100 : null;
+
+  const doMes = comissoesDoVendedor(alvo);
+  const ticket = doMes.length ? doMes.reduce((a,v)=>a+v.valor,0) / doMes.length : 0;
+  const membro = state.team.find(t => t.nome === alvo);
+  const meta = membro?.meta || 0;
+  const pctMeta = meta ? Math.min(100, (doMes.length / meta) * 100) : 0;
+
+  const maiorComissao = Math.max(1, ...historico.map(h => h.comissao));
+
+  document.getElementById('view-comissoes').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1>Comissões</h1>
+        <p class="sub">${verEquipe
+          ? 'Quanto cada pessoa da equipe ganhou com as vendas fechadas.'
+          : 'Quanto você ganhou com as vendas que fechou.'}</p>
+      </div>
+    </div>
+
+    ${verEquipe && state.team.length > 1 ? `
+    <div class="chip-filter" style="margin-bottom:14px;">
+      ${state.team.map(t => `<div class="chip ${t.nome === alvo ? 'active' : ''}" onclick="verComissoesDe('${esc(t.nome).replace(/'/g,"\\'")}')">${esc(primeiroNome(t.nome))}</div>`).join('')}
+    </div>` : ''}
+
+    <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);">
+      <div class="kpi-card">
+        <div class="kpi-label">Comissão do mês</div>
+        <div class="kpi-value" style="color:var(--success);">${brl(mesAtual.comissao)}</div>
+        ${variacao !== null ? `<div class="kpi-trend ${variacao>=0?'up':'down'}">${variacao>=0?'+':''}${variacao.toFixed(0)}% vs. mês anterior</div>` : ''}
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Vendas no mês</div>
+        <div class="kpi-value">${doMes.length}</div>
+        ${meta ? `<div class="kpi-trend">de ${meta} da meta</div>` : ''}
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Ticket médio</div>
+        <div class="kpi-value">${brl(ticket)}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Comissão nos 6 meses</div>
+        <div class="kpi-value">${brl(historico.reduce((a,h)=>a+h.comissao,0))}</div>
+      </div>
+    </div>
+
+    ${meta ? `
+    <div class="card" style="margin-top:14px;">
+      <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:9px;">
+        <div style="font-weight:700; font-size:13.5px;">Meta do mês</div>
+        <div class="cell-muted">${doMes.length} de ${meta} venda${meta>1?'s':''}</div>
+      </div>
+      <div style="height:9px; background:var(--surface-2); border-radius:20px; overflow:hidden;">
+        <div style="height:100%; width:${pctMeta}%; background:${pctMeta>=100?'var(--success)':'var(--orange)'}; border-radius:20px;"></div>
+      </div>
+      ${pctMeta >= 100
+        ? `<p class="cell-muted" style="margin-top:8px; color:var(--success);">Meta batida.</p>`
+        : `<p class="cell-muted" style="margin-top:8px;">Faltam ${meta - doMes.length} venda${meta-doMes.length>1?'s':''} para bater a meta.</p>`}
+    </div>` : ''}
+
+    <div class="section-title-row"><h2>Últimos 6 meses</h2></div>
+    <div class="card">
+      <div style="display:flex; align-items:flex-end; gap:10px; height:130px; padding-bottom:6px;">
+        ${historico.map(h => {
+          const altura = Math.max(3, (h.comissao / maiorComissao) * 100);
+          const atual = h === mesAtual;
+          return `<div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:6px; height:100%;">
+            <div style="flex:1; width:100%; display:flex; align-items:flex-end;">
+              <div title="${h.qtd} venda(s) · ${brl(h.comissao)}"
+                   style="width:100%; height:${altura}%; background:${atual?'var(--orange)':'var(--orange-soft)'}; border-radius:6px 6px 0 0; min-height:3px;"></div>
+            </div>
+            <div class="cell-muted" style="font-size:10.5px; text-align:center; line-height:1.3;">
+              ${h.rotulo}<br><span class="mono" style="font-size:10px;">${h.comissao ? brl(h.comissao).replace('R$ ','') : '—'}</span>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="section-title-row"><h2>Vendas do mês</h2></div>
+    ${doMes.length ? `
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Veículo</th><th>Comprador</th><th>Data</th><th>Valor da venda</th><th>Sua comissão</th></tr></thead>
+        <tbody>
+          ${doMes.map(v => `<tr>
+            <td class="cell-strong">${esc(v.veiculo)}</td>
+            <td>${esc(v.cliente)}</td>
+            <td class="mono">${esc(v.data)}</td>
+            <td class="mono">${brl(v.valor)}</td>
+            <td class="mono" style="font-weight:700; color:var(--success);">${brl(v.comissao || 0)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>` : `
+    <div class="card"><div class="busca-vazio">
+      Nenhuma venda fechada neste mês ainda.<br>
+      As comissões aparecem aqui assim que a primeira venda for registrada.
+    </div></div>`}
+
+    <p class="cell-muted" style="margin-top:14px; font-size:11.5px; line-height:1.5;">
+      A comissão é calculada sobre o valor da venda, no percentual definido no
+      momento do registro. Valores já lançados no financeiro da loja.
+    </p>
+  `;
+}
+
+function verComissoesDe(nome){
+  window.comissoesVendedor = nome;
+  renderComissoes();
 }
 
 /* ===================== CUSTOS DOS VEÍCULOS =====================
