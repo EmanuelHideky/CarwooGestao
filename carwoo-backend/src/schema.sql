@@ -434,3 +434,19 @@ ALTER TABLE sales ADD COLUMN IF NOT EXISTS email TEXT;
 ALTER TABLE finance_entries ADD COLUMN IF NOT EXISTS sale_id INTEGER
   REFERENCES sales(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS idx_finance_sale ON finance_entries(sale_id);
+
+-- ============================================================
+-- Custo direcionado a um veiculo
+-- ------------------------------------------------------------
+-- Nem todo custo da loja pertence a um carro: aluguel, luz, material de
+-- limpeza sao insumos que correm por fora. Mas parte dos gastos e sim de
+-- um veiculo especifico (guincho, funilaria, despachante), e sem amarrar
+-- ao carro o lucro por veiculo fica errado.
+--
+-- vehicle_id nulo = insumo da loja.  Preenchido = custo daquele carro.
+-- ON DELETE SET NULL: se o veiculo sair, o dinheiro que saiu do caixa
+-- continua na contabilidade, so deixa de ser atribuido a ele.
+-- ============================================================
+ALTER TABLE finance_entries ADD COLUMN IF NOT EXISTS vehicle_id INTEGER
+  REFERENCES vehicles(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_finance_vehicle ON finance_entries(vehicle_id);

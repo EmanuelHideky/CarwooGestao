@@ -1161,13 +1161,6 @@ let state = {
     { id:6, tipo:"saida", desc:"Aluguel do showroom", valor:8500, data:"05/07/2026", cat:"Estrutura" },
   ],
 
-  contas: [
-    { id:1, tipo:"pagar", desc:"Anúncio Mercado Livre - Plano Ouro", valor:650, venc:"28/07/2026", paga:false },
-    { id:2, tipo:"pagar", desc:"IPVA - Chevrolet Tracker (estoque)", valor:2100, venc:"30/07/2026", paga:false },
-    { id:3, tipo:"pagar", desc:"Folha de pagamento - equipe", valor:18400, venc:"05/08/2026", paga:false },
-    { id:4, tipo:"receber", desc:"Parcela financiamento - Rodrigo Nunes", valor:1450, venc:"29/07/2026", paga:false },
-    { id:5, tipo:"receber", desc:"Repasse banco - Sabrina Alves", valor:98900, venc:"31/07/2026", paga:false },
-  ],
 
   notifications: [
     { id:1, tipo:"lead", titulo:"Novo lead recebido", sub:"Marcos Vinícius via Webmotors · Fiat Argo", tempo:"12 min", lida:false, leadId:1 },
@@ -2009,8 +2002,18 @@ function agingNivel(dias){
 function custosExtrasTotal(v){
   return (v.custosExtras||[]).reduce((a,c)=>a+(Number(c.valor)||0),0);
 }
+/* Custos lançados no Financeiro e direcionados a este veículo.
+   São gastos reais do carro — guincho, funilaria, despachante — que o
+   lojista registra pelo caixa e não pela aba de Custos. Contam no custo
+   dele, senão o lucro por veículo fica maior do que foi. */
+function custosDoFinanceiro(v){
+  if(!v || !Array.isArray(state.financeEntries)) return 0;
+  return state.financeEntries
+    .filter(e => e.tipo === 'saida' && Number(e.veiculoId) === Number(v.id))
+    .reduce((a,e) => a + (Number(e.valor) || 0), 0);
+}
 function custoTotal(v){
-  return (Number(v.custo)||0) + custosExtrasTotal(v);
+  return (Number(v.custo)||0) + custosExtrasTotal(v) + custosDoFinanceiro(v);
 }
 function margemReal(v){
   const ct = custoTotal(v);
@@ -5138,32 +5141,133 @@ function salvarCustosDoVeiculo(){
   updateNavCounts();
 }
 
-/* ===================== FINANCEIRO ===================== */
-function renderFinanceiro(){
-  const entradas = state.financeEntries.filter(e=>e.tipo==='entrada').reduce((a,e)=>a+e.valor,0);
-  const saidas = state.financeEntries.filter(e=>e.tipo==='saida').reduce((a,e)=>a+e.valor,0);
-  const impostosMes = vendasDoMes().reduce((a,v)=>a+impostoDaVenda(v),0);
-  const aPagar = state.contas.filter(c=>c.tipo==='pagar' && !c.paga).reduce((a,c)=>a+c.valor,0);
-  const aReceber = state.contas.filter(c=>c.tipo==='receber' && !c.paga).reduce((a,c)=>a+c.valor,0);
+/* ===================== FINANCEIRO =====================
+   O objetivo desta tela é uma coisa só: mostrar o que sobrou de verdade.
 
-  // agrupamento real por categoria
+   Para isso, todo dinheiro que sai precisa estar em algum lugar — e os
+   custos se dividem em dois tipos que não podem ser misturados:
+     - insumo da loja: aluguel, luz, limpeza. Não é de nenhum carro.
+     - custo de veículo: guincho, funilaria, despachante. É daquele carro,
+       e entra no custo dele.
+
+   O que ainda vai vencer (a pagar / a receber) não entra no resultado do
+   mês: é compromisso, não dinheiro que passou pelo caixa.
+   ====================================================== */
+
+/* Mês de referência do relatório. Fica disponível durante o mês corrente,
+   não só depois que ele fecha. */
+function mesDoRelatorio(){
+  return window.finMesRef || (() => {
+    const h = new Date();
+    return `${h.getFullYear()}-${String(h.getMonth()+1).padStart(2,'0')}`;
+  })();
+}
+function trocarMesRelatorio(delta){
+  const [a,m] = mesDoRelatorio().split('-').map(Number);
+  const d = new Date(a, m - 1 + delta, 1);
+  const hoje = new Date();
+  // Não deixa avançar para o futuro: não há o que relatar lá
+  if(d > new Date(hoje.getFullYear(), hoje.getMonth(), 1)) return;
+  window.finMesRef = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  renderFinanceiro();
+}
+function lancamentosDoMes(mesRef = mesDoRelatorio()){
+  const [ano, mes] = mesRef.split('-').map(Number);
+  return state.financeEntries.filter(e => {
+    const d = paraData(e.data);
+    return d && d.getFullYear() === ano && (d.getMonth()+1) === mes;
+  });
+}
+
+function renderFinanceiro(){
+  const mesRef = mesDoRelatorio();
+  const [anoRef, numMes] = mesRef.split('-').map(Number);
+  const doMes = lancamentosDoMes(mesRef);
+  const pagos = doMes.filter(e => e.pago !== false);
+
+  const entradas = pagos.filter(e=>e.tipo==='entrada').reduce((a,e)=>a+e.valor,0);
+  const saidas = pagos.filter(e=>e.tipo==='saida').reduce((a,e)=>a+e.valor,0);
+  const custoVeiculos = pagos.filter(e=>e.tipo==='saida' && e.veiculoId).reduce((a,e)=>a+e.valor,0);
+  const custoInsumos = saidas - custoVeiculos;
+  const impostosMes = vendasDoMes(new Date(anoRef, numMes-1, 1)).reduce((a,v)=>a+impostoDaVenda(v),0);
+
+  // O que está em aberto vale para a loja inteira, não só para o mês
+  const aPagar = contasEmAberto('pagar').reduce((a,c)=>a+c.valor,0);
+  const aReceber = contasEmAberto('receber').reduce((a,c)=>a+c.valor,0);
+  const vencidas = [...contasEmAberto('pagar'), ...contasEmAberto('receber')]
+    .filter(c => { const v = paraData(c.vencimento); return v && v < new Date(); });
+
   const porCategoria = {};
-  state.financeEntries.filter(e=>e.tipo==='saida').forEach(e=>{
-    porCategoria[e.cat||'Sem categoria'] = (porCategoria[e.cat||'Sem categoria']||0) + e.valor;
+  pagos.filter(e=>e.tipo==='saida').forEach(e=>{
+    const k = e.cat || 'Sem categoria';
+    porCategoria[k] = (porCategoria[k]||0) + e.valor;
   });
   const maxCat = Math.max(1, ...Object.values(porCategoria));
+  const ehMesAtual = mesRef === `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
 
   document.getElementById('view-financeiro').innerHTML = `
     <div class="page-header">
-      <div><h1>Financeiro</h1><p class="sub">Fluxo de caixa, impostos e contas da loja.</p></div>
+      <div><h1>Financeiro</h1><p class="sub">O que entrou, o que saiu e o que sobrou de verdade.</p></div>
       <div style="display:flex; gap:8px;">
         <button class="btn" onclick="openContaModal()"><svg><use href="#i-clock"/></svg>Nova conta</button>
         <button class="btn btn-primary" onclick="openLancamentoModal()"><svg><use href="#i-plus"/></svg>Novo lançamento</button>
       </div>
     </div>
+
+    <!-- Relatório do mês, disponível durante o mês e não só no fechamento -->
+    <div class="card" style="margin-bottom:14px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <button class="btn btn-sm" onclick="trocarMesRelatorio(-1)" title="Mês anterior">‹</button>
+          <div>
+            <div style="font-weight:700; font-size:14px;">${MESES_NOME[numMes-1]} de ${anoRef}</div>
+            <div class="cell-muted" style="font-size:11.5px;">${ehMesAtual ? 'Mês em andamento — atualiza a cada lançamento' : 'Mês fechado'}</div>
+          </div>
+          <button class="btn btn-sm" onclick="trocarMesRelatorio(1)" ${ehMesAtual?'disabled':''} title="Mês seguinte">›</button>
+        </div>
+        <button class="btn btn-sm" onclick="exportarRelatorioFinanceiro()"><svg><use href="#i-upload"/></svg>Exportar</button>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px;">
+        <div style="background:var(--surface-2); border-radius:9px; padding:12px 14px;">
+          <div class="cell-muted" style="font-size:11px;">Entrou</div>
+          <div class="mono" style="font-size:19px; font-weight:700; color:var(--success);">${brl(entradas)}</div>
+        </div>
+        <div style="background:var(--surface-2); border-radius:9px; padding:12px 14px;">
+          <div class="cell-muted" style="font-size:11px;">Custo dos veículos</div>
+          <div class="mono" style="font-size:19px; font-weight:700; color:var(--danger);">${brl(custoVeiculos)}</div>
+        </div>
+        <div style="background:var(--surface-2); border-radius:9px; padding:12px 14px;">
+          <div class="cell-muted" style="font-size:11px;">Insumos da loja</div>
+          <div class="mono" style="font-size:19px; font-weight:700; color:var(--danger);">${brl(custoInsumos)}</div>
+        </div>
+        <div style="background:${entradas-saidas>=0?'var(--success-soft)':'var(--danger-soft)'}; border-radius:9px; padding:12px 14px;">
+          <div class="cell-muted" style="font-size:11px;">Sobrou</div>
+          <div class="mono" style="font-size:19px; font-weight:800; color:${entradas-saidas>=0?'var(--success)':'var(--danger)'};">${brl(entradas-saidas)}</div>
+        </div>
+      </div>
+
+      ${(aPagar || aReceber) ? `
+      <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border); display:flex; gap:20px; flex-wrap:wrap;">
+        <div><span class="cell-muted" style="font-size:11.5px;">Ainda a receber</span>
+          <span class="mono" style="font-weight:700; color:var(--success); margin-left:6px;">${brl(aReceber)}</span></div>
+        <div><span class="cell-muted" style="font-size:11.5px;">Ainda a pagar</span>
+          <span class="mono" style="font-weight:700; color:var(--danger); margin-left:6px;">${brl(aPagar)}</span></div>
+        <div class="cell-muted" style="font-size:11px; flex:1; min-width:180px;">Compromissos em aberto não entram no que sobrou — só contam quando o dinheiro passa pelo caixa.</div>
+      </div>` : ''}
+
+      ${vencidas.length ? `
+      <div style="margin-top:12px; background:var(--danger-soft); border-radius:8px; padding:10px 13px; display:flex; gap:9px; align-items:flex-start;">
+        <svg style="width:15px;height:15px;stroke:var(--danger); flex-shrink:0; margin-top:2px;"><use href="#i-alert"/></svg>
+        <p style="font-size:12px; color:var(--danger); line-height:1.5;">
+          <b>${vencidas.length} conta${vencidas.length>1?'s':''} vencida${vencidas.length>1?'s':''}</b> esperando baixa. Enquanto não der baixa, o caixa mostra mais dinheiro do que existe.
+        </p>
+      </div>` : ''}
+    </div>
+
     <div class="kpi-grid" style="grid-template-columns:repeat(5,1fr);">
-      <div class="kpi-card"><div class="kpi-label">Entradas</div><div class="kpi-value" style="color:var(--success)">${brl(entradas)}</div></div>
-      <div class="kpi-card"><div class="kpi-label">Saídas</div><div class="kpi-value" style="color:var(--danger)">${brl(saidas)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Entradas do mês</div><div class="kpi-value" style="color:var(--success)">${brl(entradas)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Saídas do mês</div><div class="kpi-value" style="color:var(--danger)">${brl(saidas)}</div></div>
       <div class="kpi-card"><div class="kpi-label">Saldo</div><div class="kpi-value">${brl(entradas-saidas)}</div></div>
       <div class="kpi-card"><div class="kpi-label">A receber</div><div class="kpi-value" style="color:var(--success)">${brl(aReceber)}</div></div>
       <div class="kpi-card"><div class="kpi-label">A pagar</div><div class="kpi-value" style="color:var(--danger)">${brl(aPagar)}</div></div>
@@ -5171,18 +5275,26 @@ function renderFinanceiro(){
 
     <div class="grid-2col">
       <div>
-        <div class="section-title-row" style="margin-top:0;"><h2>Lançamentos</h2></div>
+        <div class="section-title-row" style="margin-top:0;"><h2>Lançamentos de ${MESES_NOME[numMes-1]}</h2></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Descrição</th><th>Categoria</th><th>Data</th><th>Valor</th><th></th></tr></thead>
-            <tbody>${state.financeEntries.length ? state.financeEntries.slice(0,25).map(e=>`
-              <tr>
-                <td class="cell-strong">${esc(e.desc)}</td>
-                <td class="cell-muted">${esc(e.cat||'—')}</td>
-                <td class="cell-muted">${e.data}</td>
+            <thead><tr><th>Descrição</th><th>Destino</th><th>Data</th><th>Valor</th><th></th></tr></thead>
+            <tbody>${doMes.length ? doMes.slice(0,40).map(e=>`
+              <tr style="${e.pago===false?'opacity:0.72;':''}">
+                <td class="cell-strong">${esc(e.desc)}
+                  ${e.pago===false?`<span class="badge badge-warning" style="margin-left:5px;">a ${e.tipo==='saida'?'pagar':'receber'}</span>`:''}
+                  <div class="cell-muted" style="font-size:11px;">${esc(e.cat||'sem categoria')}</div>
+                </td>
+                <td>${e.veiculo
+                  ? `<span class="badge badge-info" title="Custo deste veículo">${esc(e.veiculo)}</span>`
+                  : `<span class="cell-muted" style="font-size:11.5px;">insumo da loja</span>`}</td>
+                <td class="cell-muted mono" style="font-size:11.5px;">${esc(dataServidorParaBr(e.data) || e.data)}</td>
                 <td class="mono" style="color:${e.tipo==='entrada'?'var(--success)':'var(--danger)'}">${e.tipo==='entrada'?'+':'−'} ${brl(e.valor)}</td>
-                <td><button class="btn btn-sm btn-ghost" onclick="removerLancamento(${e.id})"><svg><use href="#i-trash"/></svg></button></td>
-              </tr>`).join('') : `<tr><td colspan="5" style="text-align:center; padding:26px; color:var(--text-muted);">Nenhum lançamento ainda.</td></tr>`}
+                <td style="text-align:right; white-space:nowrap;">
+                  ${e.pago===false?`<button class="btn btn-sm" onclick="baixarConta(${e.id})" title="Dar baixa"><svg><use href="#i-check"/></svg></button>`:''}
+                  ${e.vendaId?'':`<button class="btn btn-sm btn-ghost" onclick="removerLancamento(${e.id})"><svg><use href="#i-trash"/></svg></button>`}
+                </td>
+              </tr>`).join('') : `<tr><td colspan="5" style="text-align:center; padding:26px; color:var(--text-muted);">Nenhum lançamento neste mês.</td></tr>`}
             </tbody>
           </table>
         </div>
@@ -5214,96 +5326,279 @@ function renderFinanceiro(){
     </div>
   `;
 }
+/* Contas em aberto são lançamentos com pago = false. Não existe mais uma
+   lista separada: conta e lançamento são a mesma coisa em momentos
+   diferentes, e manter dois lugares fazia a conta paga sumir do caixa. */
+function contasEmAberto(tipo){
+  const alvo = tipo === 'pagar' ? 'saida' : 'entrada';
+  return state.financeEntries
+    .filter(e => e.tipo === alvo && e.pago === false)
+    .sort((a,b) => (paraData(a.vencimento) || 0) - (paraData(b.vencimento) || 0));
+}
+
 function renderContas(tipo){
-  const lista = state.contas.filter(c=>c.tipo===tipo && !c.paga);
+  const lista = contasEmAberto(tipo);
   if(!lista.length) return '<span class="cell-muted">Nenhuma conta em aberto.</span>';
   return lista.map(c=>{
-    const venc = paraData(c.venc);
+    const venc = paraData(c.vencimento);
     const dias = venc ? Math.ceil((venc - new Date())/86400000) : null;
     const atrasada = dias !== null && dias < 0;
     return `<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--border);">
       <div style="flex:1; min-width:0;">
         <div style="font-size:12.5px; font-weight:600;">${esc(c.desc)}</div>
-        <div class="cell-muted">${atrasada?`<span style="color:var(--danger); font-weight:600;">vencida há ${Math.abs(dias)} d</span>`:`vence ${c.venc}${dias!==null?` · em ${dias} d`:''}`}</div>
+        <div class="cell-muted">${atrasada
+          ? `<span style="color:var(--danger); font-weight:600;">vencida há ${Math.abs(dias)} dia${Math.abs(dias)===1?'':'s'}</span>`
+          : (venc ? `vence ${dataServidorParaBr(c.vencimento) || c.vencimento}${dias!==null?` · em ${dias} dia${dias===1?'':'s'}`:''}` : 'sem vencimento')}
+          ${c.veiculo ? ` · <span style="color:var(--orange-dark);">${esc(c.veiculo)}</span>` : ''}</div>
       </div>
       <span class="mono" style="font-weight:700; color:${tipo==='pagar'?'var(--danger)':'var(--success)'};">${brl(c.valor)}</span>
       <button class="btn btn-sm" onclick="baixarConta(${c.id})" title="Marcar como ${tipo==='pagar'?'paga':'recebida'}"><svg><use href="#i-check"/></svg></button>
     </div>`;
   }).join('');
 }
-function baixarConta(id){
-  const c = state.contas.find(x=>x.id===id);
-  if(!c) return;
-  c.paga = true;
-  state.financeEntries.unshift({
-    id: Date.now(), tipo: c.tipo==='pagar' ? 'saida' : 'entrada',
-    desc: c.desc, valor: c.valor, data: new Date().toLocaleDateString('pt-BR'),
-    cat: c.tipo==='pagar' ? 'Conta paga' : 'Conta recebida'
-  });
-  registrarAtividade({ icone:'i-cash', cor: c.tipo==='pagar'?'danger':'success',
-    titulo: c.tipo==='pagar'?'Conta paga':'Recebimento confirmado', sub:`${c.desc} · ${brl(c.valor)}` });
-  renderFinanceiro();
-  showToast(c.tipo==='pagar' ? 'Conta marcada como paga' : 'Recebimento confirmado');
-}
-function openLancamentoModal(){
-  document.getElementById('modalTitle').textContent = "Novo lançamento";
+/* Um lançamento pode ser:
+     - insumo da loja (aluguel, luz, limpeza) ou custo de um veículo
+     - já pago/recebido, ou a pagar/receber com vencimento
+   As quatro combinações usam a mesma tela; o que muda é o que fica ligado. */
+function openLancamentoModal({ aPrazo = false } = {}){
+  window.lcVeiculo = null;
+  document.getElementById('modalTitle').textContent = aPrazo ? "Nova conta" : "Novo lançamento";
   document.getElementById('modalBox').classList.remove('wide');
   document.getElementById('modalBody').innerHTML = `
     <div class="form-grid">
-      <div class="form-field"><label>Tipo</label><select id="lcTipo" class="select"><option value="saida">Saída</option><option value="entrada">Entrada</option></select></div>
-      <div class="form-field"><label>Valor (R$)</label><input id="lcValor" type="number" class="input"></div>
+      <div class="form-field"><label>Tipo</label>
+        <select id="lcTipo" class="select" onchange="atualizarRotulosLancamento()">
+          <option value="saida">Saída — dinheiro que sai</option>
+          <option value="entrada">Entrada — dinheiro que entra</option>
+        </select>
+      </div>
+      <div class="form-field"><label>Valor (R$)</label><input id="lcValor" type="number" step="0.01" class="input"></div>
       <div class="form-field full"><label>Descrição</label><input id="lcDesc" class="input" placeholder="Ex: Aluguel do showroom"></div>
       <div class="form-field"><label>Categoria</label><input id="lcCat" class="input" list="catsFin" placeholder="Ex: Estrutura">
-        <datalist id="catsFin">${[...new Set(state.financeEntries.map(e=>e.cat).filter(Boolean))].map(c=>`<option value="${esc(c)}">`).join('')}</datalist>
+        <datalist id="catsFin">${[...new Set([...state.financeEntries.map(e=>e.cat), ...CATEGORIAS_SUGERIDAS].filter(Boolean))].map(c=>`<option value="${esc(c)}">`).join('')}</datalist>
       </div>
-      <div class="form-field"><label>Data</label><input id="lcData" class="input" value="${new Date().toLocaleDateString('pt-BR')}"></div>
+      <div class="form-field"><label id="lcRotuloData">Data</label><input id="lcData" class="input" value="${new Date().toLocaleDateString('pt-BR')}"></div>
+
+      <div class="form-field full" style="background:var(--surface-2); border-radius:10px; padding:12px 14px;">
+        <label style="margin-bottom:7px;">Situação</label>
+        <select id="lcSituacao" class="select" onchange="atualizarRotulosLancamento()">
+          <option value="pago" ${aPrazo?'':'selected'}>Já foi pago / recebido</option>
+          <option value="aprazo" ${aPrazo?'selected':''}>Ainda vai vencer — a pagar / a receber</option>
+        </select>
+        <div id="lcBlocoVenc" style="margin-top:10px; display:${aPrazo?'block':'none'};">
+          <label style="font-size:11.5px;">Vencimento</label>
+          <input id="lcVenc" class="input" placeholder="dd/mm/aaaa">
+        </div>
+      </div>
+
+      <div class="form-field full" id="lcBlocoVeiculo" style="border:1px solid var(--border); border-radius:10px; padding:12px 14px;">
+        <label style="margin-bottom:6px;">Este custo é de algum veículo?</label>
+        <p class="cell-muted" style="font-size:11.5px; line-height:1.5; margin-bottom:9px;">
+          Deixe vazio para insumo da loja (aluguel, luz, material). Se for de um carro
+          específico, busque pela placa ou pelo modelo — o valor entra no custo dele.
+        </p>
+        <input id="lcBuscaVeiculo" class="input" placeholder="Buscar por placa ou modelo..." oninput="buscarVeiculoParaLancamento(this.value)" autocomplete="off">
+        <div id="lcResultadoVeiculo"></div>
+      </div>
     </div>`;
   document.getElementById('modalFooter').innerHTML = `
     <button class="btn" onclick="closeModal()">Cancelar</button>
     <button class="btn btn-primary" onclick="salvarLancamento()"><svg><use href="#i-check"/></svg>Lançar</button>`;
   openModal();
+  atualizarRotulosLancamento();
+}
+
+const CATEGORIAS_SUGERIDAS = [
+  'Estrutura', 'Salários', 'Comissão', 'Marketing', 'Impostos',
+  'Preparação', 'Documentação', 'Guincho', 'Funilaria', 'Peças',
+  'Limpeza e materiais', 'Contabilidade', 'Energia e água', 'Internet e telefone',
+];
+
+/* Os rótulos mudam conforme o tipo: "a pagar" ou "a receber" não são a
+   mesma coisa, e a tela precisa falar a língua do que está sendo feito. */
+function atualizarRotulosLancamento(){
+  const tipo = document.getElementById('lcTipo')?.value;
+  const sit = document.getElementById('lcSituacao')?.value;
+  const bloco = document.getElementById('lcBlocoVenc');
+  const rotuloData = document.getElementById('lcRotuloData');
+  const blocoVeic = document.getElementById('lcBlocoVeiculo');
+  if(!bloco) return;
+
+  const aPrazo = sit === 'aprazo';
+  bloco.style.display = aPrazo ? 'block' : 'none';
+  rotuloData.textContent = aPrazo ? 'Data do lançamento' : (tipo === 'entrada' ? 'Data do recebimento' : 'Data do pagamento');
+
+  // Direcionar entrada a um veículo não faz sentido: entrada de carro é venda
+  if(blocoVeic){
+    blocoVeic.style.display = tipo === 'saida' ? '' : 'none';
+    if(tipo !== 'saida') limparVeiculoDoLancamento();
+  }
+}
+
+/* Busca por placa ou modelo, como o lojista pensa o carro. */
+function buscarVeiculoParaLancamento(termo){
+  const caixa = document.getElementById('lcResultadoVeiculo');
+  if(!caixa) return;
+  const t = normalizarBusca(termo);
+  if(t.length < 2){ caixa.innerHTML = ''; return; }
+
+  const achados = state.vehicles
+    .filter(v => [v.placa, v.marca, v.modelo, v.versao].some(c => normalizarBusca(c).includes(t)))
+    .slice(0, 6);
+
+  if(!achados.length){
+    caixa.innerHTML = `<div class="cell-muted" style="padding:9px 2px; font-size:12px;">Nenhum veículo com essa placa ou modelo.</div>`;
+    return;
+  }
+  caixa.innerHTML = achados.map(v => `
+    <div class="busca-item" style="border-radius:8px;" onclick="escolherVeiculoDoLancamento(${v.id})">
+      <div class="bi-icone"><svg><use href="#i-car"/></svg></div>
+      <div class="bi-txt">
+        <div class="bi-titulo">${esc(v.marca)} ${esc(v.modelo)}</div>
+        <div class="bi-sub">${esc(v.placa || 'sem placa')} · ${v.anoFab}/${v.anoMod} · ${STATUS_DEFS[v.status]?.label || v.status}</div>
+      </div>
+    </div>`).join('');
+}
+
+function escolherVeiculoDoLancamento(id){
+  const v = vehicleById(id);
+  if(!v) return;
+  window.lcVeiculo = id;
+  document.getElementById('lcResultadoVeiculo').innerHTML = `
+    <div style="margin-top:9px; display:flex; align-items:center; justify-content:space-between; gap:10px;
+                background:var(--orange-soft); border-radius:8px; padding:9px 12px;">
+      <div>
+        <div style="font-size:12.5px; font-weight:700; color:var(--orange-dark);">${esc(v.marca)} ${esc(v.modelo)}</div>
+        <div class="cell-muted" style="font-size:11px;">${esc(v.placa || 'sem placa')} · o valor entra no custo deste carro</div>
+      </div>
+      <button type="button" class="btn btn-sm" onclick="limparVeiculoDoLancamento()">Trocar</button>
+    </div>`;
+  document.getElementById('lcBuscaVeiculo').value = '';
+}
+
+function limparVeiculoDoLancamento(){
+  window.lcVeiculo = null;
+  const caixa = document.getElementById('lcResultadoVeiculo');
+  if(caixa) caixa.innerHTML = '';
+  const busca = document.getElementById('lcBuscaVeiculo');
+  if(busca) busca.value = '';
 }
 function salvarLancamento(){
   const desc = document.getElementById('lcDesc').value.trim();
   const valor = parseFloat(document.getElementById('lcValor').value);
+  const tipo = document.getElementById('lcTipo').value;
+  const aPrazo = document.getElementById('lcSituacao').value === 'aprazo';
+  const venc = (document.getElementById('lcVenc')?.value || '').trim();
+
   if(!desc || !valor){ showToast('Informe a descrição e o valor'); return; }
-  state.financeEntries.unshift({
-    id: Date.now(), tipo: document.getElementById('lcTipo').value, desc, valor,
+  if(valor <= 0){ showToast('O valor precisa ser maior que zero'); return; }
+  if(aPrazo && !venc){ showToast('Informe o vencimento'); return; }
+
+  // Direcionamento só vale para saída: entrada de carro é venda, não custo
+  const veiculoId = (tipo === 'saida' && window.lcVeiculo) ? window.lcVeiculo : null;
+  const veiculo = veiculoId ? vehicleById(veiculoId) : null;
+
+  const lanc = {
+    id: Date.now(), tipo, desc, valor,
     cat: document.getElementById('lcCat').value.trim() || 'Sem categoria',
-    data: document.getElementById('lcData').value.trim() || new Date().toLocaleDateString('pt-BR')
+    data: document.getElementById('lcData').value.trim() || new Date().toLocaleDateString('pt-BR'),
+    pago: !aPrazo,
+    vencimento: aPrazo ? venc : null,
+    veiculoId,
+    veiculo: veiculo ? `${veiculo.marca} ${veiculo.modelo}${veiculo.placa ? ' · ' + veiculo.placa : ''}` : null,
+  };
+  state.financeEntries.unshift(lanc);
+  closeModal();
+  renderFinanceiro();
+  if(state.activeView === 'estoque') renderEstoque();
+
+  showToast(aPrazo
+    ? `Conta ${tipo === 'saida' ? 'a pagar' : 'a receber'} registrada`
+    : (veiculo ? `Custo lançado em ${veiculo.marca} ${veiculo.modelo}` : 'Lançamento registrado'));
+
+  sincronizar('lançamento', async ()=>{
+    const salvo = await chamarApi('/finance', { method:'POST', body: JSON.stringify(lanc) });
+    if(salvo?.id){ lanc.id = salvo.id; renderFinanceiro(); }
   });
-  closeModal(); renderFinanceiro(); showToast('Lançamento registrado');
-  const lanc = state.financeEntries[0];
-  sincronizar('lançamento', ()=>chamarApi('/finance', { method:'POST', body: JSON.stringify(lanc) }));
 }
+
+/* Baixa uma conta: o que estava previsto vira dinheiro que entrou ou saiu
+   de verdade, com a data de hoje. */
+function baixarConta(id){
+  const e = state.financeEntries.find(x => x.id === id);
+  if(!e) return;
+  e.pago = true;
+  e.data = new Date().toLocaleDateString('pt-BR');
+  renderFinanceiro();
+  showToast(e.tipo === 'saida' ? 'Conta marcada como paga' : 'Recebimento confirmado');
+  registrarAtividade({ icone:'i-cash', cor: e.tipo === 'saida' ? 'danger' : 'success',
+    titulo: e.tipo === 'saida' ? 'Conta paga' : 'Recebimento confirmado',
+    sub: `${e.desc} · ${brl(e.valor)}` });
+  sincronizar('baixa da conta', ()=>chamarApi(`/finance/${id}/pagar`, {
+    method:'PATCH', body: JSON.stringify({ pago:true, data:e.data }),
+  }));
+}
+
 function removerLancamento(id){
-  state.financeEntries = state.financeEntries.filter(e=>e.id!==id);
-  renderFinanceiro(); showToast('Lançamento removido');
+  const e = state.financeEntries.find(x => x.id === id);
+  // Lançamento de venda não se apaga solto: some quando a venda é desfeita
+  if(e && e.vendaId){
+    showToast('Este lançamento pertence a uma venda. Desfaça a venda para removê-lo.');
+    return;
+  }
+  state.financeEntries = state.financeEntries.filter(x => x.id !== id);
+  renderFinanceiro();
+  if(state.activeView === 'estoque') renderEstoque();
+  showToast('Lançamento removido');
+  sincronizar('remoção do lançamento', ()=>chamarApi(`/finance/${id}`, { method:'DELETE' }));
 }
+/* Conta é o mesmo lançamento, só que ainda não pago. Abre a mesma tela
+   já marcada como "a prazo", em vez de manter dois cadastros diferentes. */
 function openContaModal(){
-  document.getElementById('modalTitle').textContent = "Nova conta";
-  document.getElementById('modalBox').classList.remove('wide');
-  document.getElementById('modalBody').innerHTML = `
-    <div class="form-grid">
-      <div class="form-field"><label>Tipo</label><select id="ctTipo" class="select"><option value="pagar">A pagar</option><option value="receber">A receber</option></select></div>
-      <div class="form-field"><label>Valor (R$)</label><input id="ctValor" type="number" class="input"></div>
-      <div class="form-field full"><label>Descrição</label><input id="ctDesc" class="input" placeholder="Ex: Parcela do financiamento"></div>
-      <div class="form-field full"><label>Vencimento</label><input id="ctVenc" class="input" placeholder="DD/MM/AAAA" value="${new Date().toLocaleDateString('pt-BR')}"></div>
-    </div>`;
-  document.getElementById('modalFooter').innerHTML = `
-    <button class="btn" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-primary" onclick="salvarConta()"><svg><use href="#i-check"/></svg>Criar conta</button>`;
-  openModal();
+  openLancamentoModal({ aPrazo: true });
 }
-function salvarConta(){
-  const desc = document.getElementById('ctDesc').value.trim();
-  const valor = parseFloat(document.getElementById('ctValor').value);
-  if(!desc || !valor){ showToast('Informe a descrição e o valor'); return; }
-  state.contas.push({
-    id: Date.now(), tipo: document.getElementById('ctTipo').value, desc, valor,
-    venc: document.getElementById('ctVenc').value.trim(), paga:false
-  });
-  closeModal(); renderFinanceiro(); showToast('Conta criada');
+/* Exporta o mês em planilha, separando insumo de custo de veículo —
+   é o formato que o contador pede. */
+function exportarRelatorioFinanceiro(){
+  const mesRef = mesDoRelatorio();
+  const [ano, mes] = mesRef.split('-').map(Number);
+  const doMes = lancamentosDoMes(mesRef);
+  if(!doMes.length){ showToast('Nenhum lançamento neste mês'); return; }
+
+  const pagos = doMes.filter(e => e.pago !== false);
+  const entradas = pagos.filter(e=>e.tipo==='entrada').reduce((a,e)=>a+e.valor,0);
+  const saidas = pagos.filter(e=>e.tipo==='saida').reduce((a,e)=>a+e.valor,0);
+  const custoVeic = pagos.filter(e=>e.tipo==='saida' && e.veiculoId).reduce((a,e)=>a+e.valor,0);
+
+  const linhas = [
+    ['Data','Tipo','Descrição','Categoria','Destino','Situação','Valor'],
+    ...doMes.map(e => [
+      dataServidorParaBr(e.data) || e.data,
+      e.tipo === 'entrada' ? 'Entrada' : 'Saída',
+      e.desc,
+      e.cat || 'Sem categoria',
+      e.veiculo || 'Insumo da loja',
+      e.pago === false ? (e.tipo==='saida' ? 'A pagar' : 'A receber') : 'Realizado',
+      Number(e.valor).toFixed(2).replace('.', ','),
+    ]),
+    [],
+    ['RESUMO DE ' + MESES_NOME[mes-1].toUpperCase() + ' DE ' + ano],
+    ['Entradas', '', '', '', '', '', entradas.toFixed(2).replace('.', ',')],
+    ['Custo dos veículos', '', '', '', '', '', custoVeic.toFixed(2).replace('.', ',')],
+    ['Insumos da loja', '', '', '', '', '', (saidas - custoVeic).toFixed(2).replace('.', ',')],
+    ['Resultado', '', '', '', '', '', (entradas - saidas).toFixed(2).replace('.', ',')],
+  ];
+
+  // Ponto e vírgula: é o separador que o Excel em português entende
+  const csv = linhas.map(l => l.map(c => `"${String(c ?? '').replace(/"/g,'""')}"`).join(';')).join('\n');
+  const blob = new Blob(['﻿' + csv], { type:'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `carwoo-financeiro-${mesRef}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
+  showToast('Relatório exportado');
 }
 
 /* ===================== RELATÓRIOS ===================== */
@@ -5873,9 +6168,18 @@ function gerarContasIpva(){
       const venc = dataVencimento(v, p);
       if(!venc) continue;
       const desc = `IPVA ${cfgIpva().ano} - ${v.marca} ${v.modelo} (${v.placa||'sem placa'})${ip.parcelas>1?` · parcela ${p+1}/${ip.parcelas}`:''}`;
-      if(state.contas.some(c=>c.desc === desc && !c.paga)) continue;
-      state.contas.push({ id: Date.now()+Math.random(), tipo:'pagar', desc,
-        valor: valorParcelaIpva(v), venc: venc.toLocaleDateString('pt-BR'), paga:false });
+      // O IPVA vira conta a pagar já direcionada ao veículo: é custo dele,
+      // não insumo da loja, e entra no custo do carro como qualquer outro.
+      if(state.financeEntries.some(e => e.desc === desc && e.pago === false)) continue;
+      const conta = {
+        id: Date.now()+Math.random(), tipo:'saida', desc,
+        valor: valorParcelaIpva(v), cat:'Impostos',
+        data: new Date().toLocaleDateString('pt-BR'),
+        pago: false, vencimento: venc.toLocaleDateString('pt-BR'),
+        veiculoId: v.id, veiculo: `${v.marca} ${v.modelo}${v.placa ? ' · ' + v.placa : ''}`,
+      };
+      state.financeEntries.unshift(conta);
+      sincronizar('IPVA provisionado', ()=>chamarApi('/finance', { method:'POST', body: JSON.stringify(conta) }));
       criadas++;
     }
   });
@@ -7417,7 +7721,6 @@ function limparDadosDeExemplo(){
   state.comparaveis = [];
   state.notasFiscais = [];
   state.cobrancas = [];
-  state.contas = [];
   state.atividades = [];
   state.notifications = [];
   state.team = [];
