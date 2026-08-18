@@ -21,42 +21,58 @@ fiscal. Cobrança por assinatura mensal.
 ## Estrutura
 
 ```
-carwoo-app/          front-end (PWA instalável)
-  index.html    aplicação inteira em um arquivo — HTML + CSS + JS
-  manifest.json      identidade do app instalado
-  service-worker.js  cache e modo offline
-  icons/             ícones
+carwoo-app/            front-end (PWA instalável)
+  index.html           aplicação inteira em um arquivo — HTML + CSS + JS
+  config.js            endereço do servidor — o único arquivo que muda ao publicar
+  manifest.json        identidade do app instalado
+  service-worker.js    cache e modo offline
+  icons/               ícones do app
+  marca/               os SVG originais da marca, com LEIA-ME
+  netlify.toml         cabeçalhos da publicação
 
-carwoo-backend/      API
-  src/server.js      monta as rotas
-  src/db.js          conexão Postgres (detecta SSL sozinho)
-  src/schema.sql     22 tabelas
-  src/migrate.js     aplica o schema comando a comando
-  src/routes/        auth, vehicles, leads, sales, postsale, finance,
-                     invoices, billing, store, inbound, notifications, misc
-  src/middleware/    auth (JWT), role (perfis), plan (limites do plano)
-  .env               credenciais — NUNCA versionar nem mostrar o conteúdo
+carwoo-backend/        API
+  src/server.js        monta as rotas
+  src/db.js            conexão Postgres (detecta SSL sozinho)
+  src/schema.sql       22 tabelas
+  src/migrate.js       aplica o schema comando a comando
+  src/storage.js       fotos no Supabase Storage (driver trocável)
+  src/billing-gateway.js  cobrança no Asaas (driver trocável, ainda desligado)
+  src/routes/          auth, vehicles, leads, sales, postsale, finance,
+                       invoices, billing, store, inbound, notifications, misc
+  src/middleware/      auth (JWT), role (perfis), plan (limites do plano)
+  .env                 credenciais — NUNCA versionar nem mostrar o conteúdo
 
-GUIA_WINDOWS.md      passo a passo para o Emanuel, do zero
-DEPLOY.md            etapas de publicação
+render.yaml            configuração do servidor publicado
+
+ESTADO.md              onde o projeto está e o que vem a seguir — LEIA PRIMEIRO
+PUBLICAR.md            passo a passo da publicação
+COBRANCA.md            como ligar a cobrança quando houver clientes
+GUIA_WINDOWS.md        passo a passo para o Emanuel, do zero
+DEPLOY.md              etapas de publicação (versão anterior)
 ```
 
 ## Stack
 
 Node.js + Express + PostgreSQL (`pg`). Sem framework no front-end: JavaScript
-puro manipulando o DOM. Banco no Supabase.
+puro manipulando o DOM. Banco e fotos no Supabase, servidor no Render,
+telas no Netlify.
 
 ## Estado atual
 
-**Funciona:** login com JWT, cadastro de loja, as 13 telas, persistência no
-Postgres, perfis de acesso (dono / gerente / vendedor), consulta real à tabela
-FIPE, validação de CPF e CNPJ com dígitos verificadores, cálculo de IPVA,
-garantia com baixa automática, PWA instalável.
+**Está no ar**, em fase de testes. Endereços e detalhes da publicação estão
+no `ESTADO.md`.
+
+**Funciona:** login com JWT, cadastro de loja, as 15 telas, persistência no
+Postgres, fotos no Supabase Storage, perfis de acesso (dono / gerente /
+vendedor), consulta real à tabela FIPE, validação de CPF e CNPJ com dígitos
+verificadores, cálculo de IPVA, garantia com baixa automática, busca global,
+ficha do veículo para imprimir, custo por veículo, comissões, PWA instalável.
 
 **Ainda não funciona de verdade** (depende de contrato com terceiros):
-cobrança de assinatura (falta gateway), emissão de NF-e (falta provedor fiscal
-e certificado), publicação automática nos portais (falta parceria comercial),
-e-mail de recuperação de senha (falta provedor de e-mail).
+cobrança de assinatura (código pronto, falta abrir conta — ver `COBRANCA.md`),
+emissão de NF-e (falta provedor fiscal e certificado), publicação automática
+nos portais (falta parceria comercial), e-mail de recuperação de senha
+(falta domínio próprio e provedor de e-mail).
 
 Em todos esses casos o código tem o ponto de integração marcado com comentário
 e a interface avisa o usuário que aquilo ainda não está ativo. **Não finja que
@@ -85,6 +101,18 @@ funcionam.**
 
 6. **O `.env` tem a senha do banco.** Não mostre o conteúdo, não versione, não
    cole em lugar nenhum.
+
+7. **Verifique antes de afirmar.** Este projeto tem um padrão recorrente de
+   defeito: a tela pede o dado, a coluna existe no banco, e a rota do servidor
+   ignora — o dado some sem aviso. Já aconteceu com fotos, descrição, renavam,
+   custo da venda, garantia e contas a pagar. Antes de dizer que algo funciona
+   ou que falta, confira nos três lugares: o que a tela envia, o que a rota
+   grava e o que ela devolve.
+
+8. **Ao mexer em ícone, manifest ou visual, suba duas versões:** o
+   `CACHE_VERSION` do `service-worker.js` e o `?v=` dos ícones no `index.html`
+   e no `manifest.json`. Sem isso o navegador continua servindo o arquivo
+   antigo e parece que a alteração não funcionou.
 
 ## Tarefa: colocar no ar
 
