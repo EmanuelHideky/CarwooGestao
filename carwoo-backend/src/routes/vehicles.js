@@ -110,7 +110,7 @@ router.post('/', checarLimite('veiculos'), asyncRoute(async (req, res) => {
   if (pode(req, 'custos')) await salvarCustos(veiculo.id, b.custosExtras);
   await salvarPortais(veiculo.id, b.portais);
 
-  res.status(201).json(await montarVeiculo(veiculo));
+  res.status(201).json(filtrarVeiculo(await montarVeiculo(veiculo), req));
 }));
 
 // PUT /api/vehicles/:id
@@ -144,7 +144,7 @@ router.put('/:id', asyncRoute(async (req, res) => {
   if (b.custosExtras !== undefined && pode(req, 'custos')) await salvarCustos(rows[0].id, b.custosExtras);
   if (b.portais !== undefined) await salvarPortais(rows[0].id, b.portais);
 
-  res.json(await montarVeiculo(rows[0]));
+  res.json(filtrarVeiculo(await montarVeiculo(rows[0]), req));
 }));
 
 // PUT /api/vehicles/:id/costs -> custo de aquisicao e custos de preparacao

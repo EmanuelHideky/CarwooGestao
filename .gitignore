@@ -31,3 +31,6 @@ build/
 
 # Configuracao local do Claude Code - nao faz parte do projeto
 .claude/
+
+# Atalhos do Windows que caem na pasta sem querer
+*.lnk

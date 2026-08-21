@@ -76,19 +76,61 @@ data vinda da tela for para uma coluna de data.
 
 ---
 
+## Testes automáticos
+
+Desde agosto de 2026 o backend tem testes. Rodar dentro de `carwoo-backend`:
+
+```
+npm test
+```
+
+Tem que terminar em `pass 24` e `fail 0`. Se aparecer `fail` acima de zero,
+**não publique** — a mensagem diz qual campo sumiu e em qual arquivo.
+Detalhes em `carwoo-backend/testes/LEIA-ME.md`.
+
+Não precisam de banco, de internet nem do `.env`: usam um banco de mentira
+que guarda o que a rota mandou gravar e devolve na leitura.
+
+Rodam sozinhos a cada `git push`, pelo GitHub Actions (`.github/workflows`),
+mas **não seguram a publicação** — o Render republica sem esperar o resultado.
+O sinal vermelho avisa que quebrou; não impede que suba.
+
+Eles já pegaram um defeito real no primeiro dia: as respostas de cadastro e
+de edição de veículo não passavam pelo filtro de perfil. Um vendedor que
+editasse a quilometragem de um carro recebia, na resposta, o custo de compra
+que o dono lançou. Corrigido em `routes/vehicles.js` e `routes/sales.js`.
+
+---
+
 ## O que falta, em ordem de urgência
 
-### 1. RENAVE — tem prazo
+### 1. RENAVE — o prazo é do lojista, não da carwoo
 
-A Resolução CONTRAN 1.026/2026 tornou obrigatório em todo o Brasil, com 90
-dias de prazo a partir de 30 de junho de 2026 — vencendo por volta de **28 de
-setembro de 2026**.
+**Leia isto antes de tratar o RENAVE como urgência.** A frase "tem prazo",
+que estava aqui antes, deu a entender que a carwoo estava fora da lei. Não
+está.
 
-Revendas precisam registrar entrada e saída de estoque por meio de uma
-**integradora autorizada pela Senatran**. Virar integradora é processo longo;
-o caminho realista é fazer parceria com uma já homologada.
+A Resolução CONTRAN 1.026/2026, publicada em 30 de junho de 2026, deu 90
+dias de adaptação — vencendo em **28 de setembro de 2026**. Revendas passam a
+registrar entrada, saída, transferência e consignação de veículos por meio de
+uma **integradora homologada pela Senatran**.
 
-**Depende do Emanuel**, não de código: é conversa comercial.
+**A obrigação é da loja, não do software.** A carwoo não é entidade regulada
+e não é multada. O lojista tem essa obrigação use ele a carwoo, um
+concorrente ou um caderno.
+
+O que afeta a carwoo é **comercial, não legal**: se o lojista registra o
+estoque no sistema da integradora, ele cadastra o mesmo carro duas vezes — e
+o sistema da integradora começa a parecer o estoque de verdade. O risco é a
+carwoo virar a ferramenta redundante, não a carwoo virar ilegal.
+
+Virar integradora é processo longo; o caminho realista é parceria com uma já
+homologada.
+
+**Depende do Emanuel**, não de código: é conversa comercial. E a primeira
+conversa é com os próprios lojistas — perguntar como eles estão resolvendo o
+RENAVE hoje. "O sistema da integradora já cuida do meu estoque" é sinal de
+alerta; "é um saco, cadastro tudo duas vezes" é a brecha comercial.
 
 ### 2. CNPJ
 

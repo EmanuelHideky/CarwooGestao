@@ -159,7 +159,7 @@ router.post('/', asyncRoute(async (req, res) => {
     }
 
     await cliente.query('COMMIT');
-    res.status(201).json(mapear(rows[0]));
+    res.status(201).json(filtrarVenda(mapear(rows[0]), req));
   } catch (err) {
     await cliente.query('ROLLBACK');
     throw err;

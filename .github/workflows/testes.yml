@@ -1,0 +1,38 @@
+# Roda os testes sozinho a cada push e a cada pull request.
+#
+# O QUE ISSO FAZ NA PRATICA
+# Depois de um "git push", o GitHub executa os testes e marca o commit
+# com um sinal verde ou vermelho. Se algum teste quebrar, aparece um X
+# vermelho na pagina do repositorio e chega um e-mail.
+#
+# ATENCAO: isto NAO impede o Render de publicar. O Render republica
+# assim que o push chega, sem esperar o resultado. O sinal vermelho
+# avisa que tem coisa quebrada — nao segura a publicacao.
+
+name: testes
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  testar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # npm ci instala exatamente as versoes do package-lock.json
+      - name: Instalar dependencias
+        working-directory: carwoo-backend
+        run: npm ci
+
+      # Os testes usam um banco de mentira: nao precisam de Postgres,
+      # nem de .env, nem de credencial nenhuma.
+      - name: Rodar os testes
+        working-directory: carwoo-backend
+        run: npm test
