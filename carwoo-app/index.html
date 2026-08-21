@@ -4365,7 +4365,7 @@ function openVendaModal(veiculoId){
       <div class="form-field"><label>Forma de pagamento</label><select id="vdPagamento" class="select"><option>À vista</option><option>Financiado</option><option>Cartão</option><option>Pix</option><option>Consórcio</option></select></div>
       <div class="form-field"><label>Vendedor</label><select id="vdVendedor" class="select">${state.team.map(t=>`<option ${leadCandidato&&leadCandidato.vendedor===t.nome?'selected':''}>${t.nome}</option>`).join('')}</select></div>
       <div class="form-field"><label>Comissão (%)</label><input id="vdComissaoPct" type="number" step="0.1" class="input" value="3" oninput="previaVenda()"></div>
-      <div class="form-field"><label>Data da venda</label><input id="vdData" class="input" value="${new Date().toLocaleDateString('pt-BR')}"></div>
+      <div class="form-field"><label>Data da venda</label><input id="vdData" class="input" maxlength="10" inputmode="numeric" oninput="formatarData(this)" value="${new Date().toLocaleDateString('pt-BR')}"></div>
       <div class="form-field"><label>Garantia (dias)</label><input id="vdGarantia" type="number" class="input" value="${state.configLoja.garantiaPadraoDias}"></div>
       ${leadCandidato?`<div class="form-field full"><label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" id="vdFecharLead" checked style="width:15px;height:15px;accent-color:var(--orange);">Marcar o lead de ${esc(leadCandidato.nome)} como ganho</label></div>`:''}
     </div>
@@ -5377,7 +5377,7 @@ function openLancamentoModal({ aPrazo = false } = {}){
       <div class="form-field"><label>Categoria</label><input id="lcCat" class="input" list="catsFin" placeholder="Ex: Estrutura">
         <datalist id="catsFin">${[...new Set([...state.financeEntries.map(e=>e.cat), ...CATEGORIAS_SUGERIDAS].filter(Boolean))].map(c=>`<option value="${esc(c)}">`).join('')}</datalist>
       </div>
-      <div class="form-field"><label id="lcRotuloData">Data</label><input id="lcData" class="input" value="${new Date().toLocaleDateString('pt-BR')}"></div>
+      <div class="form-field"><label id="lcRotuloData">Data</label><input id="lcData" class="input" maxlength="10" inputmode="numeric" oninput="formatarData(this)" value="${new Date().toLocaleDateString('pt-BR')}"></div>
 
       <div class="form-field full" style="background:var(--surface-2); border-radius:10px; padding:12px 14px;">
         <label style="margin-bottom:7px;">Situação</label>
@@ -5387,7 +5387,7 @@ function openLancamentoModal({ aPrazo = false } = {}){
         </select>
         <div id="lcBlocoVenc" style="margin-top:10px; display:${aPrazo?'block':'none'};">
           <label style="font-size:11.5px;">Vencimento</label>
-          <input id="lcVenc" class="input" placeholder="dd/mm/aaaa">
+          <input id="lcVenc" class="input" placeholder="dd/mm/aaaa" maxlength="10" inputmode="numeric" oninput="formatarData(this)">
         </div>
       </div>
 
@@ -5966,8 +5966,8 @@ function renderIpva(){
                 <td><span class="mono" style="display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:7px; background:var(--orange-soft); color:var(--orange-dark); font-weight:800; font-size:12.5px;">${d}</span></td>
                 <td>${carros.length}</td>
                 <td class="mono">${carros.length?brl(valor):'—'}</td>
-                <td><input class="input mono" style="width:120px; padding:5px 8px; font-size:12px;" value="${esc(c.unica||'')}" placeholder="DD/MM/AAAA" onchange="definirDataCalendario(${d},'unica',this.value)"></td>
-                <td><input class="input mono" style="width:120px; padding:5px 8px; font-size:12px;" value="${esc(c.primeiraParcela||'')}" placeholder="DD/MM/AAAA" onchange="definirDataCalendario(${d},'primeiraParcela',this.value)"></td>
+                <td><input class="input mono" style="width:120px; padding:5px 8px; font-size:12px;" value="${esc(c.unica||'')}" placeholder="DD/MM/AAAA" maxlength="10" inputmode="numeric" oninput="formatarData(this)" onchange="definirDataCalendario(${d},'unica',this.value)"></td>
+                <td><input class="input mono" style="width:120px; padding:5px 8px; font-size:12px;" value="${esc(c.primeiraParcela||'')}" placeholder="DD/MM/AAAA" maxlength="10" inputmode="numeric" oninput="formatarData(this)" onchange="definirDataCalendario(${d},'primeiraParcela',this.value)"></td>
                 <td>${preenchido
                   ? '<span class="badge badge-success">oficial</span>'
                   : `<span class="badge badge-warning" title="Estimativa: ${mesEstimado}">estimado · ${mesEstimado.slice(0,3)}</span>`}</td>
@@ -7468,6 +7468,16 @@ function exibirCep(v){
 function formatarCep(campo){
   let d = campo.value.replace(/\D/g,'').slice(0,8);
   campo.value = d.length > 5 ? d.replace(/^(\d{5})(\d{0,3})/, '$1-$2') : d;
+}
+/* Data: o lojista digita so os numeros e a barra entra sozinha. A barra so
+   aparece quando ja existe digito depois dela — se ela viesse antes, o
+   backspace ficaria preso apagando um separador que o campo repunha. */
+function formatarData(campo){
+  const d = campo.value.replace(/\D/g,'').slice(0,8);
+  let v = d.slice(0,2);
+  if(d.length > 2) v += '/' + d.slice(2,4);
+  if(d.length > 4) v += '/' + d.slice(4);
+  campo.value = v;
 }
 function formatarCnpj(campo){
   let v = campo.value.replace(/\D/g,'').slice(0,14);
