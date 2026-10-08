@@ -57,6 +57,23 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Consulta o banco de verdade. O plano gratuito do Supabase pausa o projeto
+// depois de uma semana sem uso; a tarefa .github/workflows/manter-banco-ativo.yml
+// chama este endereço a cada 3 dias para isso não acontecer.
+//
+// Fica separado do /api/health de propósito: aquele é o que o Render usa para
+// saber se o servidor está de pé, e não deve cair só porque o banco oscilou.
+// Não devolve nenhum dado — só se o banco respondeu.
+app.get('/api/health/db', async (req, res) => {
+  try {
+    await require('./db').query('SELECT 1 FROM stores LIMIT 1');
+    res.json({ ok: true, banco: 'respondendo' });
+  } catch (err) {
+    console.error('[health/db]', err.message);
+    res.status(503).json({ ok: false, banco: 'sem resposta' });
+  }
+});
+
 // Público
 app.use('/api/auth', authRoutes);
 

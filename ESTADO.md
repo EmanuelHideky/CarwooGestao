@@ -49,6 +49,15 @@ testes locais, usar sempre o número.
 `Ctrl+Shift+R` não limpa. Por isso os ícones têm `?v=` no endereço. Ao
 trocá-los, subir esse número **e** o `CACHE_VERSION` do service worker.
 
+**O plano gratuito do Supabase pausa o banco** após uma semana sem uso. Já
+aconteceu em outubro de 2026. Reativar em supabase.com/dashboard > projeto >
+Restore project, e depois fazer "Manual Deploy" no Render (a publicação que
+caiu com o banco pausado não se refaz sozinha). Para evitar, a tarefa
+`.github/workflows/manter-banco-ativo.yml` chama `/api/health/db` a cada 3
+dias. O GitHub desliga tarefas agendadas após 60 dias sem push; se chegar
+e-mail avisando, religar na aba Actions. No plano Pro do Supabase, nada
+disso é necessário.
+
 **O plano gratuito do Render hiberna** após 15 min sem acesso. A primeira
 tela do dia demora de 30 a 50 segundos. Avisar quem for testar.
 

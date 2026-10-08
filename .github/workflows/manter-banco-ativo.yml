@@ -1,0 +1,41 @@
+# Mantem o banco do Supabase acordado.
+#
+# POR QUE EXISTE
+# O plano gratuito do Supabase pausa o projeto depois de uma semana sem uso.
+# Isso ja aconteceu uma vez (outubro de 2026). Esta tarefa chama o servidor a
+# cada 3 dias, e o servidor faz uma consulta minima no banco.
+#
+# NAO PRECISA DE SENHA: quem fala com o banco e o servidor no Render, que ja
+# tem a conexao. Aqui so se chama o endereco publico /api/health/db.
+#
+# SE FALHAR, o GitHub marca um X vermelho na aba Actions e manda e-mail.
+# Causas provaveis: o banco ja foi pausado (reativar no painel do Supabase)
+# ou o servidor do Render esta fora do ar.
+#
+# ATENCAO: o GitHub desliga tarefas agendadas de repositorios que ficam 60
+# dias sem nenhum envio de codigo. Ele avisa por e-mail antes. Para religar:
+# aba Actions > "manter banco ativo" > Enable workflow.
+#
+# Quando houver cliente pagante e o Supabase passar para o plano Pro, que
+# nao pausa, este arquivo pode ser apagado.
+
+name: manter banco ativo
+
+on:
+  schedule:
+    # A cada 3 dias, as 12h UTC (9h em Brasilia)
+    - cron: '0 12 */3 * *'
+  # Permite rodar na hora pelo botao "Run workflow" na aba Actions
+  workflow_dispatch:
+
+jobs:
+  cutucar-banco:
+    runs-on: ubuntu-latest
+    steps:
+      # O plano gratuito do Render hiberna e leva ate ~50s para acordar,
+      # por isso o tempo de espera alto e as novas tentativas.
+      - name: Chamar o servidor, que consulta o banco
+        run: |
+          curl --fail --silent --show-error \
+            --max-time 120 --retry 3 --retry-delay 30 --retry-all-errors \
+            https://carwoo-api.onrender.com/api/health/db
