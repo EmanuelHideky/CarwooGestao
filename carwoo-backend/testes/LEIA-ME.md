@@ -16,7 +16,7 @@ Dentro da pasta `carwoo-backend`:
 npm test
 ```
 
-Deve terminar com `pass 24` e `fail 0`. Se aparecer `fail` com qualquer
+Deve terminar com `pass 30` e `fail 0`. Se aparecer `fail` com qualquer
 número acima de zero, **alguma coisa quebrou — não publique.** A mensagem
 diz qual campo sumiu e em qual arquivo.
 
@@ -32,6 +32,7 @@ gravar e devolve na leitura, igual ao banco de verdade faria.
 | `permissoes.test.js` | vendedor nunca recebe custo, lucro ou margem |
 | `veiculo-tres-lados.test.js` | todo campo que a tela envia volta na resposta |
 | `vazamento-custo.test.js` | vendedor que edita um carro não vê o custo do dono |
+| `acesso-desativado.test.js` | funcionário desativado é barrado na hora, e troca de perfil vale sem esperar novo login |
 
 ## Ao criar uma rota nova
 

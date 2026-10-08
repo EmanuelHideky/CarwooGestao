@@ -84,7 +84,7 @@ Desde agosto de 2026 o backend tem testes. Rodar dentro de `carwoo-backend`:
 npm test
 ```
 
-Tem que terminar em `pass 24` e `fail 0`. Se aparecer `fail` acima de zero,
+Tem que terminar em `pass 30` e `fail 0`. Se aparecer `fail` acima de zero,
 **não publique** — a mensagem diz qual campo sumiu e em qual arquivo.
 Detalhes em `carwoo-backend/testes/LEIA-ME.md`.
 
